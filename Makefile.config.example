@@ -1,3 +1,4 @@
+
 ## Refer to http://caffe.berkeleyvision.org/installation.html
 # Contributions simplifying and improving our build system are welcome!
 
@@ -5,25 +6,11 @@
 # USE_CUDNN := 1
 
 # CPU-only switch (uncomment to build without GPU support).
-CPU_ONLY := 1
-
-# Switch to enable flag to run code on Xeon Phi
-XEON_PHI := 1
-
-# Switch to enable debug of Xeon phi
-#XEON_PHI_ESSENTIAL_DEBUG := 1
-
-# Switch to enable debug of Xeon phi
-#XEON_PHI_DEBUG := 1
-
-# Get time for each forward-backward layers
-#LAYER_TIME := 1
+# CPU_ONLY := 1
 
 # To customize your choice of compiler, uncomment and set the following.
 # N.B. the default for Linux is g++ and the default for OSX is clang++
-CUSTOM_CXX := icpc
-CC := icc
-LD := icpc
+# CUSTOM_CXX := g++
 
 # CUDA directory contains bin/ and lib/ directories that we need.
 CUDA_DIR := /usr/local/cuda
@@ -49,7 +36,7 @@ BLAS := atlas
 # Leave commented to accept the defaults for your choice of BLAS
 # (which should work)!
 # BLAS_INCLUDE := /path/to/your/blas
-BLAS_LIB := /usr/lib64/atlas
+# BLAS_LIB := /path/to/your/blas
 
 # This is required only if you will compile the matlab interface.
 # MATLAB directory should contain the mex binary in /bin.

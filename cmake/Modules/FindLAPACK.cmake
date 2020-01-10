@@ -50,4 +50,119 @@ macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
         if(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/loca
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
+            ENV DYLD_LIBRARY_PATH)
+        else(APPLE)
+          find_library(${_prefix}_${_library}_LIBRARY
+            NAMES ${_library}
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
+            ENV LD_LIBRARY_PATH)
+        endif(APPLE)
+      endif(WIN32)
+      mark_as_advanced(${_prefix}_${_library}_LIBRARY)
+      set(${LIBRARIES} ${${LIBRARIES}} ${${_prefix}_${_library}_LIBRARY})
+      set(_libraries_work ${${_prefix}_${_library}_LIBRARY})
+    endif(_libraries_work)
+  endforeach(_library ${_list})
+  if(_libraries_work)
+    # Test this combination of libraries.
+    set(CMAKE_REQUIRED_LIBRARIES ${_flags} ${${LIBRARIES}} ${_blas})
+    if (CMAKE_Fortran_COMPILER_WORKS)
+      check_fortran_function_exists(${_name} ${_prefix}${_combined_name}_WORKS)
+    else (CMAKE_Fortran_COMPILER_WORKS)
+      check_function_exists("${_name}_" ${_prefix}${_combined_name}_WORKS)
+    endif (CMAKE_Fortran_COMPILER_WORKS)
+    set(CMAKE_REQUIRED_LIBRARIES)
+    mark_as_advanced(${_prefix}${_combined_name}_WORKS)
+    set(_libraries_work ${${_prefix}${_combined_name}_WORKS})
+  endif(_libraries_work)
+  if(NOT _libraries_work)
+    set(${LIBRARIES} FALSE)
+  endif(NOT _libraries_work)
+endmacro(Check_Lapack_Libraries)
+
+
+if(BLAS_FOUND)
+
+  # Intel MKL
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "mkl"))
+    IF(MKL_LAPACK_LIBRARIES)
+      SET(LAPACK_LIBRARIES ${MKL_LAPACK_LIBRARIES} ${MKL_LIBRARIES})
+    ELSE(MKL_LAPACK_LIBRARIES)
+      SET(LAPACK_LIBRARIES ${MKL_LIBRARIES})
+    ENDIF(MKL_LAPACK_LIBRARIES)
+    SET(LAPACK_INCLUDE_DIR ${MKL_INCLUDE_DIR})
+    SET(LAPACK_INFO "mkl")
+  ENDIF()
+
+  # OpenBlas
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" OPEN_LAPACK_WORKS)
+    if(OPEN_LAPACK_WORKS)
+      SET(LAPACK_INFO "open")
+    else()
+      message(STATUS "It seems OpenBlas has not been compiled with Lapack support")
+    endif()
+  endif()
+
+  # GotoBlas
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "goto"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" GOTO_LAPACK_WORKS)
+    if(GOTO_LAPACK_WORKS)
+      SET(LAPACK_INFO "goto")
+    else()
+      message(STATUS "It seems GotoBlas has not been compiled with Lapack support")
+    endif()
+  endif()
+
+  # ACML
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "acml"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" ACML_LAPACK_WORKS)
+    if(ACML_LAPACK_WORKS)
+      SET(LAPACK_INFO "acml")
+    else()
+      message(STATUS "Strangely, this ACML library does not support Lapack?!")
+    endif()
+  endif()
+
+  # Accelerate
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "accelerate"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" ACCELERATE_LAPACK_WORKS)
+    if(ACCELERATE_LAPACK_WORKS)
+      SET(LAPACK_INFO "accelerate")
+    else()
+      message(STATUS "Strangely, this Accelerate library does not support Lapack?!")
+    endif()
+  endif()
+
+  # vecLib
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "veclib"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" VECLIB_LAPACK_WORKS)
+    if(VECLIB_LAPACK_WORKS)
+      SET(LAPACK_INFO "veclib")
+    else()
+      message(STATUS "Strangely, this vecLib library does not support Lapack?!")
+    endif()
+  endif()
+
+  # Generic LAPACK library?
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "generic"))
+    check_lapack_libraries(
+      LAPACK_LIBRARIES
+      LAPACK
+      cheev
+      ""
+      "lapack"
+      "${BLAS_LIBRARIES}"
+      )
+    if(LAPACK_LIBRARIES)
+      SET(LAPACK_INFO "generic")
+    endif(LAPACK_LIBRARIES)
+  endif()
+
+else(B

@@ -165,4 +165,26 @@ if(BLAS_FOUND)
     endif(LAPACK_LIBRARIES)
   endif()
 
-else(B
+else(BLAS_FOUND)
+  message(STATUS "LAPACK requires BLAS")
+endif(BLAS_FOUND)
+
+if(LAPACK_INFO)
+  set(LAPACK_FOUND TRUE)
+else(LAPACK_INFO)
+  set(LAPACK_FOUND FALSE)
+endif(LAPACK_INFO)
+
+IF (NOT LAPACK_FOUND AND LAPACK_FIND_REQUIRED)
+  message(FATAL_ERROR "Cannot find a library with LAPACK API. Please specify library location.")
+ENDIF (NOT LAPACK_FOUND AND LAPACK_FIND_REQUIRED)
+IF(NOT LAPACK_FIND_QUIETLY)
+  IF(LAPACK_FOUND)
+    MESSAGE(STATUS "Found a library with LAPACK API. (${LAPACK_INFO})")
+  ELSE(LAPACK_FOUND)
+    MESSAGE(STATUS "Cannot find a library with LAPACK API. Not using LAPACK.")
+  ENDIF(LAPACK_FOUND)
+ENDIF(NOT LAPACK_FIND_QUIETLY)
+
+# Do nothing if LAPACK was found before
+ENDIF(NOT LAPACK_FOUND)

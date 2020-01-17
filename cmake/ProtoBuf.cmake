@@ -85,4 +85,6 @@ function(caffe_protobuf_generate_cpp_py output_dir srcs_var hdrs_var python_var)
 
   set_source_files_properties(${${srcs_var}} ${${hdrs_var}} ${${python_var}} PROPERTIES GENERATED TRUE)
   set(${srcs_var} ${${srcs_var}} PARENT_SCOPE)
-  set(${hdrs_var} ${${hdrs_va
+  set(${hdrs_var} ${${hdrs_var}} PARENT_SCOPE)
+  set(${python_var} ${${python_var}} PARENT_SCOPE)
+endfunction()

@@ -27,4 +27,8 @@ if(VECLIB_FOUND)
     message(STATUS "Found standalone vecLib.framework")
   else()
     set(vecLib_LINKER_LIBS -lcblas "-framework Accelerate")
-    message(STATUS "Found vecLib as part of A
+    message(STATUS "Found vecLib as part of Accelerate.framework")
+  endif()
+
+  mark_as_advanced(vecLib_INCLUDE_DIR)
+endif()

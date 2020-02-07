@@ -25,4 +25,21 @@ title: Installation: RHEL / Fedora / CentOS
     unzip master.zip
     cd gflags-master
     mkdir build && cd build
-   
+    export CXXFLAGS="-fPIC" && cmake .. && make VERBOSE=1
+    make && make install
+    # lmdb
+    git clone git://gitorious.org/mdb/mdb.git
+    cd mdb/libraries/liblmdb
+    make && make install
+
+Note that glog does not compile with the most recent gflags version (2.1), so before that is resolved you will need to build with glog first.
+
+**CUDA**: Install via the NVIDIA package instead of `yum` to be certain of the library and driver versions.
+Install the library and latest driver separately; the driver bundled with the library is usually out-of-date.
+    + CentOS/RHEL/Fedora:
+
+**BLAS**: install ATLAS by `sudo yum install atlas-devel` or install OpenBLAS or MKL for better CPU performance. For the Makefile build, uncomment and set `BLAS_LIB` accordingly as ATLAS is usually installed under `/usr/lib[64]/atlas`).
+
+**Python** (optional): if you use the default Python you will need to `sudo yum install` the `python-devel` package to have the Python headers for building the pycaffe wrapper.
+
+Continue with [compilation](installation.html#compilation).

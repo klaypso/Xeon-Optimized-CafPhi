@@ -44,4 +44,78 @@ To install CUDA, go to the [NVIDIA CUDA website](https://developer.nvidia.com/cu
 
 For best performance, Caffe can be accelerated by [NVIDIA cuDNN](https://developer.nvidia.com/cudnn). Register for free at the cuDNN site, install it, then continue with these installation instructions. To compile with cuDNN set the `USE_CUDNN := 1` flag set in your `Makefile.config`.
 
-Caffe requires BLAS as the backend of its matrix and vector com
+Caffe requires BLAS as the backend of its matrix and vector computations.
+There are several implementations of this library. The choice is yours:
+
+* [ATLAS](http://math-atlas.sourceforge.net/): free, open source, and so the default for Caffe.
+* [Intel MKL](http://software.intel.com/en-us/intel-mkl): commercial and optimized for Intel CPUs, with a free trial and [student](http://software.intel.com/en-us/intel-education-offerings) licenses.
+    1. Install MKL.
+    2. Set `BLAS := mkl` in `Makefile.config`
+* [OpenBLAS](http://www.openblas.net/): free and open source; this optimized and parallel BLAS could require more effort to install, although it might offer a speedup.
+    1. Install OpenBLAS
+    2. Set `BLAS := open` in `Makefile.config`
+
+### Python and/or MATLAB Caffe (optional)
+
+#### Python
+
+The main requirements are `numpy` and `boost.python` (provided by boost). `pandas` is useful too and needed for some examples.
+
+You can install the dependencies with
+
+    for req in $(cat requirements.txt); do pip install $req; done
+
+but we suggest first installing the [Anaconda](https://store.continuum.io/cshop/anaconda/) Python distribution, which provides most of the necessary packages, as well as the `hdf5` library dependency.
+
+To import the `caffe` Python module after completing the installation, add the module directory to your `$PYTHONPATH` by `export PYTHONPATH=/path/to/caffe/python:$PYTHONPATH` or the like. You should not import the module in the `caffe/python/caffe` directory!
+
+*Caffe's Python interface works with Python 2.7. Python 3.3+ should work out of the box without protobuf support. For protobuf support please install protobuf 3.0 alpha (https://developers.google.com/protocol-buffers/). Earlier Pythons are your own adventure.*
+
+#### MATLAB
+
+Install MATLAB, and make sure that its `mex` is in your `$PATH`.
+
+*Caffe's MATLAB interface works with versions 2014a/b, 2013a/b, and 2012b.*
+
+#### Windows
+
+There is an unofficial Windows port of Caffe at [niuzhiheng/caffe:windows](https://github.com/niuzhiheng/caffe). Thanks [@niuzhiheng](https://github.com/niuzhiheng)!
+
+## Compilation
+
+Now that you have the prerequisites, edit your `Makefile.config` to change the paths for your setup The defaults should work, but uncomment the relevant lines if using Anaconda Python.
+
+    cp Makefile.config.example Makefile.config
+    # Adjust Makefile.config (for example, if using Anaconda Python)
+    make all
+    make test
+    make runtest
+
+- For cuDNN acceleration, you should uncomment the `USE_CUDNN := 1` switch in `Makefile.config`.
+- For CPU-only Caffe, uncomment `CPU_ONLY := 1` in `Makefile.config`.
+
+To compile the Python and MATLAB wrappers do `make pycaffe` and `make matcaffe` respectively.
+Be sure to set your MATLAB and Python paths in `Makefile.config` first!
+
+**Distribution**: run `make distribute` to create a `distribute` directory with all the Caffe headers, compiled libraries, binaries, etc. needed for distribution to other machines.
+
+**Speed**: for a faster build, compile in parallel by doing `make all -j8` where 8 is the number of parallel threads for compilation (a good choice for the number of threads is the number of cores in your machine).
+
+Now that you have installed Caffe, check out the [MNIST tutorial](gathered/examples/mnist.html) and the [reference ImageNet model tutorial](gathered/examples/imagenet.html).
+
+### CMake Compilation
+
+In lieu of manually editing `Makefile.config` to configure the build, Caffe offers an unofficial CMake build thanks to @Nerei, @akosiorek, and other members of the community. It requires CMake version >= 2.8.7.
+The basic steps are as follows:
+
+    mkdir build
+    cd build
+    cmake ..
+    make all
+    make runtest
+
+See [PR #1667](https://github.com/BVLC/caffe/pull/1667) for options and details.
+
+## Hardware
+
+**Laborat

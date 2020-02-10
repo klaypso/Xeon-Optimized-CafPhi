@@ -69,3 +69,9 @@ Compile pycaffe by `make pycaffe`. The module dir caffe/python/caffe should be i
 ## MATLAB
 
 The MATLAB interface -- matcaffe -- is the `caffe` mex and its helper m-files in caffe/matlab. Load models, do forward and backward, extract output and read-only model weights, and load the binaryproto format mean as a matrix.
+
+A MATLAB demo is in caffe/matlab/caffe/matcaffe_demo.m
+
+Note that MATLAB matrices and memory are in column-major layout counter to Caffe's row-major layout! Double-check your work accordingly.
+
+Compile matcaffe by `make matcaffe`.

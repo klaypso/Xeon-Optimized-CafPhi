@@ -34,4 +34,47 @@ For custom data it may be necessary to hack your own input preparation tool or d
 
 As we are often interested in the values as well as the gradients of the blob, a Blob stores two chunks of memories, *data* and *diff*. The former is the normal data that we pass along, and the latter is the gradient computed by the network.
 
-Further, as the actual values could be stored either on the CPU and on the GPU, there are two different ways to access them: the const way, which does not change the values, and 
+Further, as the actual values could be stored either on the CPU and on the GPU, there are two different ways to access them: the const way, which does not change the values, and the mutable way, which changes the values:
+
+    const Dtype* cpu_data() const;
+    Dtype* mutable_cpu_data();
+
+(similarly for gpu and diff).
+
+The reason for such design is that, a Blob uses a SyncedMem class to synchronize values between the CPU and GPU in order to hide the synchronization details and to minimize data transfer. A rule of thumb is, always use the const call if you do not want to change the values, and never store the pointers in your own object. Every time you work on a blob, call the functions to get the pointers, as the SyncedMem will need this to figure out when to copy data.
+
+In practice when GPUs are present, one loads data from the disk to a blob in CPU code, calls a device kernel to do GPU computation, and ferries the blob off to the next layer, ignoring low-level details while maintaining a high level of performance. As long as all layers have GPU implementations, all the intermediate data and gradients will remain in the GPU.
+
+If you want to check out when a Blob will copy data, here is an illustrative example:
+
+    // Assuming that data are on the CPU initially, and we have a blob.
+    const Dtype* foo;
+    Dtype* bar;
+    foo = blob.gpu_data(); // data copied cpu->gpu.
+    foo = blob.cpu_data(); // no data copied since both have up-to-date contents.
+    bar = blob.mutable_gpu_data(); // no data copied.
+    // ... some operations ...
+    bar = blob.mutable_gpu_data(); // no data copied when we are still on GPU.
+    foo = blob.cpu_data(); // data copied gpu->cpu, since the gpu side has modified the data
+    foo = blob.gpu_data(); // no data copied since both have up-to-date contents
+    bar = blob.mutable_cpu_data(); // still no data copied.
+    bar = blob.mutable_gpu_data(); // data copied cpu->gpu.
+    bar = blob.mutable_cpu_data(); // data copied gpu->cpu.
+
+## Layer computation and connections
+
+The layer is the essence of a model and the fundamental unit of computation. Layers convolve filters, pool, take inner products, apply nonlinearities like rectified-linear and sigmoid and other elementwise transformations, normalize, load data, and compute losses like softmax and hinge. [See the layer catalogue](layers.html) for all operations. Most of the types needed for state-of-the-art deep learning tasks are there.
+
+<img src="fig/layer.jpg" alt="A layer with bottom and top blob." width="256">
+
+A layer takes input through *bottom* connections and makes output through *top* connections.
+
+Each layer type defines three critical computations: *setup*, *forward*, and *backward*.
+
+- Setup: initialize the layer and its connections once at model initialization.
+- Forward: given input from bottom compute the output and send to the top.
+- Backward: given the gradient w.r.t. the top output compute the gradient w.r.t. to the input and send to the bottom. A layer with parameters computes the gradient w.r.t. to its parameters and stores it internally.
+
+More specifically, there will be two Forward and Backward functions implemented, one for CPU and one for GPU. If you do not implement a GPU version, the layer will fall back to the CPU functions as a backup option. This may come handy if you would like to do quick experiments, although it may come with additional data transfer cost (its inputs will be copied from GPU to CPU, and its outputs will be copied back from CPU to GPU).
+
+Layers have two key responsibilities for the operation of the network as a whole: a *forward pass* that takes the inputs and produces the outputs, and a *backward pass* that takes the gradient with respect to the output, and computes the gradients with respect to the parameters and to the inputs, which are in turn back-propagated to earlier layers. These passes 

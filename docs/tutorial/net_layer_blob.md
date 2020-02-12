@@ -77,4 +77,74 @@ Each layer type defines three critical computations: *setup*, *forward*, and *ba
 
 More specifically, there will be two Forward and Backward functions implemented, one for CPU and one for GPU. If you do not implement a GPU version, the layer will fall back to the CPU functions as a backup option. This may come handy if you would like to do quick experiments, although it may come with additional data transfer cost (its inputs will be copied from GPU to CPU, and its outputs will be copied back from CPU to GPU).
 
-Layers have two key responsibilities for the operation of the network as a whole: a *forward pass* that takes the inputs and produces the outputs, and a *backward pass* that takes the gradient with respect to the output, and computes the gradients with respect to the parameters and to the inputs, which are in turn back-propagated to earlier layers. These passes 
+Layers have two key responsibilities for the operation of the network as a whole: a *forward pass* that takes the inputs and produces the outputs, and a *backward pass* that takes the gradient with respect to the output, and computes the gradients with respect to the parameters and to the inputs, which are in turn back-propagated to earlier layers. These passes are simply the composition of each layer's forward and backward.
+
+Developing custom layers requires minimal effort by the compositionality of the network and modularity of the code. Define the setup, forward, and backward for the layer and it is ready for inclusion in a net.
+
+## Net definition and operation
+
+The net jointly defines a function and its gradient by composition and auto-differentiation. The composition of every layer's output computes the function to do a given task, and the composition of every layer's backward computes the gradient from the loss to learn the task. Caffe models are end-to-end machine learning engines.
+
+The net is a set of layers connected in a computation graph -- a directed acyclic graph (DAG) to be exact. Caffe does all the bookkeeping for any DAG of layers to ensure correctness of the forward and backward passes. A typical net begins with a data layer that loads from disk and ends with a loss layer that computes the objective for a task such as classification or reconstruction.
+
+The net is defined as a set of layers and their connections in a plaintext modeling language.
+A simple logistic regression classifier
+
+<img src="fig/logreg.jpg" alt="Softmax Regression" width="256">
+
+is defined by
+
+    name: "LogReg"
+    layers {
+      name: "mnist"
+      type: DATA
+      top: "data"
+      top: "label"
+      data_param {
+        source: "input_leveldb"
+        batch_size: 64
+      }
+    }
+    layers {
+      name: "ip"
+      type: INNER_PRODUCT
+      bottom: "data"
+      top: "ip"
+      inner_product_param {
+        num_output: 2
+      }
+    }
+    layers {
+      name: "loss"
+      type: SOFTMAX_LOSS
+      bottom: "ip"
+      bottom: "label"
+      top: "loss"
+    }
+
+Model initialization is handled by `Net::Init()`. The initialization mainly does two things: scaffolding the overall DAG by creating the blobs and layers (for C++ geeks: the network will retain ownership of the blobs and layers during its lifetime), and calls the layers' `SetUp()` function. It also does a set of other bookkeeping things, such as validating the correctness of the overall network architecture. Also, during initialization the Net explains its initialization by logging to INFO as it goes:
+
+    I0902 22:52:17.931977 2079114000 net.cpp:39] Initializing net from parameters:
+    name: "LogReg"
+    [...model prototxt printout...]
+    # construct the network layer-by-layer
+    I0902 22:52:17.932152 2079114000 net.cpp:67] Creating Layer mnist
+    I0902 22:52:17.932165 2079114000 net.cpp:356] mnist -> data
+    I0902 22:52:17.932188 2079114000 net.cpp:356] mnist -> label
+    I0902 22:52:17.932200 2079114000 net.cpp:96] Setting up mnist
+    I0902 22:52:17.935807 2079114000 data_layer.cpp:135] Opening leveldb input_leveldb
+    I0902 22:52:17.937155 2079114000 data_layer.cpp:195] output data size: 64,1,28,28
+    I0902 22:52:17.938570 2079114000 net.cpp:103] Top shape: 64 1 28 28 (50176)
+    I0902 22:52:17.938593 2079114000 net.cpp:103] Top shape: 64 1 1 1 (64)
+    I0902 22:52:17.938611 2079114000 net.cpp:67] Creating Layer ip
+    I0902 22:52:17.938617 2079114000 net.cpp:394] ip <- data
+    I0902 22:52:17.939177 2079114000 net.cpp:356] ip -> ip
+    I0902 22:52:17.939196 2079114000 net.cpp:96] Setting up ip
+    I0902 22:52:17.940289 2079114000 net.cpp:103] Top shape: 64 2 1 1 (128)
+    I0902 22:52:17.941270 2079114000 net.cpp:67] Creating Layer loss
+    I0902 22:52:17.941305 2079114000 net.cpp:394] loss <- ip
+    I0902 22:52:17.941314 2079114000 net.cpp:394] loss <- label
+    I0902 22:52:17.941323 2079114000 net.cpp:356] loss -> loss
+    # set up the loss and configure the backward pass
+    I0902 22:52:17.941328 2079114000 net.cpp:96] Setting up loss
+    I0902 22:52:17.941328 2079114000 net.cpp:103] Top shape: 1 1 1 1 (1

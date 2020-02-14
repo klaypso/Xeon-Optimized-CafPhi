@@ -147,4 +147,24 @@ Model initialization is handled by `Net::Init()`. The initialization mainly does
     I0902 22:52:17.941323 2079114000 net.cpp:356] loss -> loss
     # set up the loss and configure the backward pass
     I0902 22:52:17.941328 2079114000 net.cpp:96] Setting up loss
-    I0902 22:52:17.941328 2079114000 net.cpp:103] Top shape: 1 1 1 1 (1
+    I0902 22:52:17.941328 2079114000 net.cpp:103] Top shape: 1 1 1 1 (1)
+    I0902 22:52:17.941329 2079114000 net.cpp:109]     with loss weight 1
+    I0902 22:52:17.941779 2079114000 net.cpp:170] loss needs backward computation.
+    I0902 22:52:17.941787 2079114000 net.cpp:170] ip needs backward computation.
+    I0902 22:52:17.941794 2079114000 net.cpp:172] mnist does not need backward computation.
+    # determine outputs
+    I0902 22:52:17.941800 2079114000 net.cpp:208] This network produces output loss
+    # finish initialization and report memory usage
+    I0902 22:52:17.941810 2079114000 net.cpp:467] Collecting Learning Rate and Weight Decay.
+    I0902 22:52:17.941818 2079114000 net.cpp:219] Network initialization done.
+    I0902 22:52:17.941824 2079114000 net.cpp:220] Memory required for data: 201476
+
+Note that the construction of the network is device agnostic - recall our earlier explanation that blobs and layers hide implementation details from the model definition. After construction, the network is run on either CPU or GPU by setting a single switch defined in `Caffe::mode()` and set by `Caffe::set_mode()`. Layers come with corresponding CPU and GPU routines that produce identical results (up to numerical errors, and with tests to guard it). The CPU / GPU switch is seamless and independent of the model definition. For research and deployment alike it is best to divide model and implementation.
+
+### Model format
+
+The models are defined in plaintext protocol buffer schema (prototxt) while the learned models are serialized as binary protocol buffer (binaryproto) .caffemodel files.
+
+The model format is defined by the protobuf schema in [caffe.proto](https://github.com/BVLC/caffe/blob/master/src/caffe/proto/caffe.proto). The source file is mostly self-explanatory so one is encouraged to check it out.
+
+Caffe speaks [Google Protocol Buffer](https://code.google.com/p/protobuf/) for the following strengths: minimal-size binary strings when serialized, efficient serialization, a human-readable text format compatible with the binary version, and efficient interface implementations in multiple languages, most notably C++ and Python. This all contributes to the flexibility and extensibility of modeling in Caffe.

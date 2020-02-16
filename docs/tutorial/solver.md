@@ -90,4 +90,59 @@ To use a learning rate policy like this, you can put the following lines somewhe
     momentum: 0.9
 
 Under the above settings, we'll always use `momentum` $$ \mu = 0.9 $$.
-We'll begin training at a `base_lr` of $$ \alpha = 0.01 = 10^{-2} $$ for the first 100,000 iterations, then multiply the learning rate by `gamma` ($$ \gamma $$) and train at $$ \alpha' = \alpha \gamma = (0.01) (0.1) = 0.001 = 10^{-3} $$ for i
+We'll begin training at a `base_lr` of $$ \alpha = 0.01 = 10^{-2} $$ for the first 100,000 iterations, then multiply the learning rate by `gamma` ($$ \gamma $$) and train at $$ \alpha' = \alpha \gamma = (0.01) (0.1) = 0.001 = 10^{-3} $$ for iterations 100K-200K, then at $$ \alpha'' = 10^{-4} $$ for iterations 200K-300K, and finally train until iteration 350K (since we have `max_iter: 350000`) at $$ \alpha''' = 10^{-5} $$.
+
+Note that the momentum setting $$ \mu $$ effectively multiplies the size of your updates by a factor of $$ \frac{1}{1 - \mu} $$ after many iterations of training, so if you increase $$ \mu $$, it may be a good idea to **decrease** $$ \alpha $$ accordingly (and vice versa).
+
+For example, with $$ \mu = 0.9 $$, we have an effective update size multiplier of $$ \frac{1}{1 - 0.9} = 10 $$.
+If we increased the momentum to $$ \mu = 0.99 $$, we've increased our update size multiplier to 100, so we should drop $$ \alpha $$ (`base_lr`) by a factor of 10.
+
+Note also that the above settings are merely guidelines, and they're definitely not guaranteed to be optimal (or even work at all!) in every situation.
+If learning diverges (e.g., you start to see very large or `NaN` or `inf` loss values or outputs), try dropping the `base_lr` (e.g., `base_lr: 0.001`) and re-training, repeating this until you find a `base_lr` value that works.
+
+[1] A. Krizhevsky, I. Sutskever, and G. Hinton.
+    [ImageNet Classification with Deep Convolutional Neural Networks](http://papers.nips.cc/paper/4824-imagenet-classification-with-deep-convolutional-neural-networks.pdf).
+    *Advances in Neural Information Processing Systems*, 2012.
+
+### AdaGrad
+
+The **adaptive gradient** (`solver_type: ADAGRAD`) method (Duchi et al. [1]) is a gradient-based optimization method (like SGD) that attempts to "find needles in haystacks in the form of very predictive but rarely seen features," in Duchi et al.'s words.
+Given the update information from all previous iterations $$ \left( \nabla L(W) \right)_{t'} $$ for $$ t' \in \{1, 2, ..., t\} $$,
+the update formulas proposed by [1] are as follows, specified for each component $$i$$ of the weights $$W$$:
+
+$$
+(W_{t+1})_i =
+(W_t)_i - \alpha
+\frac{\left( \nabla L(W_t) \right)_{i}}{
+    \sqrt{\sum_{t'=1}^{t} \left( \nabla L(W_{t'}) \right)_i^2}
+}
+$$
+
+Note that in practice, for weights $$ W \in \mathcal{R}^d $$, AdaGrad implementations (including the one in Caffe) use only $$ \mathcal{O}(d) $$ extra storage for the historical gradient information (rather than the $$ \mathcal{O}(dt) $$ storage that would be necessary to store each historical gradient individually).
+
+[1] J. Duchi, E. Hazan, and Y. Singer.
+    [Adaptive Subgradient Methods for Online Learning and Stochastic Optimization](http://www.magicbroom.info/Papers/DuchiHaSi10.pdf).
+    *The Journal of Machine Learning Research*, 2011.
+
+### NAG
+
+**Nesterov's accelerated gradient** (`solver_type: NESTEROV`) was proposed by Nesterov [1] as an "optimal" method of convex optimization, achieving a convergence rate of $$ \mathcal{O}(1/t^2) $$ rather than the $$ \mathcal{O}(1/t) $$.
+Though the required assumptions to achieve the $$ \mathcal{O}(1/t^2) $$ convergence typically will not hold for deep networks trained with Caffe (e.g., due to non-smoothness and non-convexity), in practice NAG can be a very effective method for optimizing certain types of deep learning architectures, as demonstrated for deep MNIST autoencoders by Sutskever et al. [2].
+
+The weight update formulas look very similar to the SGD updates given above:
+
+$$
+V_{t+1} = \mu V_t - \alpha \nabla L(W_t + \mu V_t)
+$$
+
+$$
+W_{t+1} = W_t + V_{t+1}
+$$
+
+What distinguishes the method from SGD is the weight setting $$ W $$ on which we compute the error gradient $$ \nabla L(W) $$ -- in NAG we take the gradient on weights with added momentum $$ \nabla L(W_t + \mu V_t) $$; in SGD we simply take the gradient $$ \nabla L(W_t) $$ on the current weights themselves.
+
+[1] Y. Nesterov.
+    A Method of Solving a Convex Programming Problem with Convergence Rate $$\mathcal{O}(1/\sqrt{k})$$.
+    *Soviet Mathematics Doklady*, 1983.
+
+[2] I. Sutskever, J. Martens, G. Dahl, and G. Hinton

@@ -145,4 +145,78 @@ What distinguishes the method from SGD is the weight setting $$ W $$ on which we
     A Method of Solving a Convex Programming Problem with Convergence Rate $$\mathcal{O}(1/\sqrt{k})$$.
     *Soviet Mathematics Doklady*, 1983.
 
-[2] I. Sutskever, J. Martens, G. Dahl, and G. Hinton
+[2] I. Sutskever, J. Martens, G. Dahl, and G. Hinton.
+    [On the Importance of Initialization and Momentum in Deep Learning](http://www.cs.toronto.edu/~fritz/absps/momentum.pdf).
+    *Proceedings of the 30th International Conference on Machine Learning*, 2013.
+
+## Scaffolding
+
+The solver scaffolding prepares the optimization method and initializes the model to be learned in `Solver::Presolve()`.
+
+    > caffe train -solver examples/mnist/lenet_solver.prototxt
+    I0902 13:35:56.474978 16020 caffe.cpp:90] Starting Optimization
+    I0902 13:35:56.475190 16020 solver.cpp:32] Initializing solver from parameters:
+    test_iter: 100
+    test_interval: 500
+    base_lr: 0.01
+    display: 100
+    max_iter: 10000
+    lr_policy: "inv"
+    gamma: 0.0001
+    power: 0.75
+    momentum: 0.9
+    weight_decay: 0.0005
+    snapshot: 5000
+    snapshot_prefix: "examples/mnist/lenet"
+    solver_mode: GPU
+    net: "examples/mnist/lenet_train_test.prototxt"
+
+Net initialization
+
+    I0902 13:35:56.655681 16020 solver.cpp:72] Creating training net from net file: examples/mnist/lenet_train_test.prototxt
+    [...]
+    I0902 13:35:56.656740 16020 net.cpp:56] Memory required for data: 0
+    I0902 13:35:56.656791 16020 net.cpp:67] Creating Layer mnist
+    I0902 13:35:56.656811 16020 net.cpp:356] mnist -> data
+    I0902 13:35:56.656846 16020 net.cpp:356] mnist -> label
+    I0902 13:35:56.656874 16020 net.cpp:96] Setting up mnist
+    I0902 13:35:56.694052 16020 data_layer.cpp:135] Opening lmdb examples/mnist/mnist_train_lmdb
+    I0902 13:35:56.701062 16020 data_layer.cpp:195] output data size: 64,1,28,28
+    I0902 13:35:56.701146 16020 data_layer.cpp:236] Initializing prefetch
+    I0902 13:35:56.701196 16020 data_layer.cpp:238] Prefetch initialized.
+    I0902 13:35:56.701212 16020 net.cpp:103] Top shape: 64 1 28 28 (50176)
+    I0902 13:35:56.701230 16020 net.cpp:103] Top shape: 64 1 1 1 (64)
+    [...]
+    I0902 13:35:56.703737 16020 net.cpp:67] Creating Layer ip1
+    I0902 13:35:56.703753 16020 net.cpp:394] ip1 <- pool2
+    I0902 13:35:56.703778 16020 net.cpp:356] ip1 -> ip1
+    I0902 13:35:56.703797 16020 net.cpp:96] Setting up ip1
+    I0902 13:35:56.728127 16020 net.cpp:103] Top shape: 64 500 1 1 (32000)
+    I0902 13:35:56.728142 16020 net.cpp:113] Memory required for data: 5039360
+    I0902 13:35:56.728175 16020 net.cpp:67] Creating Layer relu1
+    I0902 13:35:56.728194 16020 net.cpp:394] relu1 <- ip1
+    I0902 13:35:56.728219 16020 net.cpp:345] relu1 -> ip1 (in-place)
+    I0902 13:35:56.728240 16020 net.cpp:96] Setting up relu1
+    I0902 13:35:56.728256 16020 net.cpp:103] Top shape: 64 500 1 1 (32000)
+    I0902 13:35:56.728270 16020 net.cpp:113] Memory required for data: 5167360
+    I0902 13:35:56.728287 16020 net.cpp:67] Creating Layer ip2
+    I0902 13:35:56.728304 16020 net.cpp:394] ip2 <- ip1
+    I0902 13:35:56.728333 16020 net.cpp:356] ip2 -> ip2
+    I0902 13:35:56.728356 16020 net.cpp:96] Setting up ip2
+    I0902 13:35:56.728690 16020 net.cpp:103] Top shape: 64 10 1 1 (640)
+    I0902 13:35:56.728705 16020 net.cpp:113] Memory required for data: 5169920
+    I0902 13:35:56.728734 16020 net.cpp:67] Creating Layer loss
+    I0902 13:35:56.728747 16020 net.cpp:394] loss <- ip2
+    I0902 13:35:56.728767 16020 net.cpp:394] loss <- label
+    I0902 13:35:56.728786 16020 net.cpp:356] loss -> loss
+    I0902 13:35:56.728811 16020 net.cpp:96] Setting up loss
+    I0902 13:35:56.728837 16020 net.cpp:103] Top shape: 1 1 1 1 (1)
+    I0902 13:35:56.728849 16020 net.cpp:109]     with loss weight 1
+    I0902 13:35:56.728878 16020 net.cpp:113] Memory required for data: 5169924
+
+Loss
+
+    I0902 13:35:56.728893 16020 net.cpp:170] loss needs backward computation.
+    I0902 13:35:56.728909 16020 net.cpp:170] ip2 needs backward computation.
+    I0902 13:35:56.728924 16020 net.cpp:170] relu1 needs backward computation.
+    I0902 13:35:56.728938 16020 net.cpp:170] ip1 needs backwar

@@ -219,4 +219,53 @@ Loss
     I0902 13:35:56.728893 16020 net.cpp:170] loss needs backward computation.
     I0902 13:35:56.728909 16020 net.cpp:170] ip2 needs backward computation.
     I0902 13:35:56.728924 16020 net.cpp:170] relu1 needs backward computation.
-    I0902 13:35:56.728938 16020 net.cpp:170] ip1 needs backwar
+    I0902 13:35:56.728938 16020 net.cpp:170] ip1 needs backward computation.
+    I0902 13:35:56.728953 16020 net.cpp:170] pool2 needs backward computation.
+    I0902 13:35:56.728970 16020 net.cpp:170] conv2 needs backward computation.
+    I0902 13:35:56.728984 16020 net.cpp:170] pool1 needs backward computation.
+    I0902 13:35:56.728998 16020 net.cpp:170] conv1 needs backward computation.
+    I0902 13:35:56.729014 16020 net.cpp:172] mnist does not need backward computation.
+    I0902 13:35:56.729027 16020 net.cpp:208] This network produces output loss
+    I0902 13:35:56.729053 16020 net.cpp:467] Collecting Learning Rate and Weight Decay.
+    I0902 13:35:56.729071 16020 net.cpp:219] Network initialization done.
+    I0902 13:35:56.729085 16020 net.cpp:220] Memory required for data: 5169924
+    I0902 13:35:56.729277 16020 solver.cpp:156] Creating test net (#0) specified by net file: examples/mnist/lenet_train_test.prototxt
+
+Completion
+
+    I0902 13:35:56.806970 16020 solver.cpp:46] Solver scaffolding done.
+    I0902 13:35:56.806984 16020 solver.cpp:165] Solving LeNet
+
+
+## Updating Parameters
+
+The actual weight update is made by the solver then applied to the net parameters in `Solver::ComputeUpdateValue()`.
+The `ComputeUpdateValue` method incorporates any weight decay $$ r(W) $$ into the weight gradients (which currently just contain the error gradients) to get the final gradient with respect to each network weight.
+Then these gradients are scaled by the learning rate $$ \alpha $$ and the update to subtract is stored in each parameter Blob's `diff` field.
+Finally, the `Blob::Update` method is called on each parameter blob, which performs the final update (subtracting the Blob's `diff` from its `data`).
+
+## Snapshotting and Resuming
+
+The solver snapshots the weights and its own state during training in `Solver::Snapshot()` and `Solver::SnapshotSolverState()`.
+The weight snapshots export the learned model while the solver snapshots allow training to be resumed from a given point.
+Training is resumed by `Solver::Restore()` and `Solver::RestoreSolverState()`.
+
+Weights are saved without extension while solver states are saved with `.solverstate` extension.
+Both files will have an `_iter_N` suffix for the snapshot iteration number.
+
+Snapshotting is configured by:
+
+    # The snapshot interval in iterations.
+    snapshot: 5000
+    # File path prefix for snapshotting model weights and solver state.
+    # Note: this is relative to the invocation of the `caffe` utility, not the
+    # solver definition file.
+    snapshot_prefix: "/path/to/model"
+    # Snapshot the diff along with the weights. This can help debugging training
+    # but takes more storage.
+    snapshot_diff: false
+    # A final snapshot is saved at the end of training unless
+    # this flag is set to false. The default is true.
+    snapshot_after_train: true
+
+in the solver definition prototxt.

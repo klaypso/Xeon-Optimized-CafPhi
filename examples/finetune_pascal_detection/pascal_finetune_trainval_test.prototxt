@@ -381,4 +381,11 @@ layer {
 }
 layer {
   name: "accuracy"
-  type: "Accurac
+  type: "Accuracy"
+  bottom: "fc8_pascal"
+  bottom: "label"
+  top: "accuracy"
+  include {
+    phase: TEST
+  }
+}

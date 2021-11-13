@@ -184,3 +184,86 @@ Layer definitions can include rules for whether and when they are included in th
     }
 
 This is a rule, which controls layer inclusion in the network, based on current network's state.
+You can refer to `$CAFFE_ROOT/src/caffe/proto/caffe.proto` for more information about layer rules and model schema.
+
+In the above example, this layer will be included only in `TRAIN` phase.
+If we change `TRAIN` with `TEST`, then this layer will be used only in test phase.
+By default, that is without layer rules, a layer is always included in the network.
+Thus, `lenet_train_test.prototxt` has two `DATA` layers defined (with different `batch_size`), one for the training phase and one for the testing phase.
+Also, there is an `ACCURACY` layer which is included only in `TEST` phase for reporting the model accuracy every 100 iteration, as defined in `lenet_solver.prototxt`.
+
+## Define the MNIST Solver
+
+Check out the comments explaining each line in the prototxt `$CAFFE_ROOT/examples/mnist/lenet_solver.prototxt`:
+
+    # The train/test net protocol buffer definition
+    net: "examples/mnist/lenet_train_test.prototxt"
+    # test_iter specifies how many forward passes the test should carry out.
+    # In the case of MNIST, we have test batch size 100 and 100 test iterations,
+    # covering the full 10,000 testing images.
+    test_iter: 100
+    # Carry out testing every 500 training iterations.
+    test_interval: 500
+    # The base learning rate, momentum and the weight decay of the network.
+    base_lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0005
+    # The learning rate policy
+    lr_policy: "inv"
+    gamma: 0.0001
+    power: 0.75
+    # Display every 100 iterations
+    display: 100
+    # The maximum number of iterations
+    max_iter: 10000
+    # snapshot intermediate results
+    snapshot: 5000
+    snapshot_prefix: "examples/mnist/lenet"
+    # solver mode: CPU or GPU
+    solver_mode: GPU
+
+
+## Training and Testing the Model
+
+Training the model is simple after you have written the network definition protobuf and solver protobuf files. Simply run `train_lenet.sh`, or the following command directly:
+
+    cd $CAFFE_ROOT
+    ./examples/mnist/train_lenet.sh
+
+`train_lenet.sh` is a simple script, but here is a quick explanation: the main tool for training is `caffe` with action `train` and the solver protobuf text file as its argument.
+
+When you run the code, you will see a lot of messages flying by like this:
+
+    I1203 net.cpp:66] Creating Layer conv1
+    I1203 net.cpp:76] conv1 <- data
+    I1203 net.cpp:101] conv1 -> conv1
+    I1203 net.cpp:116] Top shape: 20 24 24
+    I1203 net.cpp:127] conv1 needs backward computation.
+
+These messages tell you the details about each layer, its connections and its output shape, which may be helpful in debugging. After the initialization, the training will start:
+
+    I1203 net.cpp:142] Network initialization done.
+    I1203 solver.cpp:36] Solver scaffolding done.
+    I1203 solver.cpp:44] Solving LeNet
+
+Based on the solver setting, we will print the training loss function every 100 iterations, and test the network every 1000 iterations. You will see messages like this:
+
+    I1203 solver.cpp:204] Iteration 100, lr = 0.00992565
+    I1203 solver.cpp:66] Iteration 100, loss = 0.26044
+    ...
+    I1203 solver.cpp:84] Testing net
+    I1203 solver.cpp:111] Test score #0: 0.9785
+    I1203 solver.cpp:111] Test score #1: 0.0606671
+
+For each training iteration, `lr` is the learning rate of that iteration, and `loss` is the training function. For the output of the testing phase, score 0 is the accuracy, and score 1 is the testing loss function.
+
+And after a few minutes, you are done!
+
+    I1203 solver.cpp:84] Testing net
+    I1203 solver.cpp:111] Test score #0: 0.9897
+    I1203 solver.cpp:111] Test score #1: 0.0324599
+    I1203 solver.cpp:126] Snapshotting to lenet_iter_10000
+    I1203 solver.cpp:133] Snapshotting solver state to lenet_iter_10000.solverstate
+    I1203 solver.cpp:78] Optimization Done.
+
+The final mod

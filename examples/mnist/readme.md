@@ -266,4 +266,22 @@ And after a few minutes, you are done!
     I1203 solver.cpp:133] Snapshotting solver state to lenet_iter_10000.solverstate
     I1203 solver.cpp:78] Optimization Done.
 
-The final mod
+The final model, stored as a binary protobuf file, is stored at
+
+    lenet_iter_10000
+
+which you can deploy as a trained model in your application, if you are training on a real-world application dataset.
+
+### Um... How about GPU training?
+
+You just did! All the training was carried out on the GPU. In fact, if you would like to do training on CPU, you can simply change one line in `lenet_solver.prototxt`:
+
+    # solver mode: CPU or GPU
+    solver_mode: CPU
+
+and you will be using CPU for training. Isn't that easy?
+
+MNIST is a small dataset, so training with GPU does not really introduce too much benefit due to communication overheads. On larger datasets with more complex models, such as ImageNet, the computation speed difference will be more significant.
+
+### How to reduce the learning rate a fixed steps?
+Look at lenet_multistep_solver.prototxt

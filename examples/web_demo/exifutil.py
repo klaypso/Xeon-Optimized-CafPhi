@@ -27,4 +27,13 @@ def open_oriented_im(im_path):
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
         img = np.tile(img, (1, 1, 3))
-    eli
+    elif img.shape[2] == 4:
+        img = img[:, :, :3]
+    return img
+
+
+def apply_orientation(im, orientation):
+    if orientation in ORIENTATIONS:
+        for method in ORIENTATIONS[orientation]:
+            im = im.transpose(method)
+    return im

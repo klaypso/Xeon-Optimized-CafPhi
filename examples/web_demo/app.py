@@ -141,4 +141,87 @@ class ImagenetClassifier(object):
 
         self.bet = cPickle.load(open(bet_file))
         # A bias to prefer children nodes in single-chain paths
-        # I am setting the va
+        # I am setting the value to 0.1 as a quick, simple model.
+        # We could use better psychological models here...
+        self.bet['infogain'] -= np.array(self.bet['preferences']) * 0.1
+
+    def classify_image(self, image):
+        try:
+            starttime = time.time()
+            scores = self.net.predict([image], oversample=True).flatten()
+            endtime = time.time()
+
+            indices = (-scores).argsort()[:5]
+            predictions = self.labels[indices]
+
+            # In addition to the prediction text, we will also produce
+            # the length for the progress bar visualization.
+            meta = [
+                (p, '%.5f' % scores[i])
+                for i, p in zip(indices, predictions)
+            ]
+            logging.info('result: %s', str(meta))
+
+            # Compute expected information gain
+            expected_infogain = np.dot(
+                self.bet['probmat'], scores[self.bet['idmapping']])
+            expected_infogain *= self.bet['infogain']
+
+            # sort the scores
+            infogain_sort = expected_infogain.argsort()[::-1]
+            bet_result = [(self.bet['words'][v], '%.5f' % expected_infogain[v])
+                          for v in infogain_sort[:5]]
+            logging.info('bet result: %s', str(bet_result))
+
+            return (True, meta, bet_result, '%.3f' % (endtime - starttime))
+
+        except Exception as err:
+            logging.info('Classification error: %s', err)
+            return (False, 'Something went wrong when classifying the '
+                           'image. Maybe try another one?')
+
+
+def start_tornado(app, port=5000):
+    http_server = tornado.httpserver.HTTPServer(
+        tornado.wsgi.WSGIContainer(app))
+    http_server.listen(port)
+    print("Tornado server starting on port {}".format(port))
+    tornado.ioloop.IOLoop.instance().start()
+
+
+def start_from_terminal(app):
+    """
+    Parse command line options and start the server.
+    """
+    parser = optparse.OptionParser()
+    parser.add_option(
+        '-d', '--debug',
+        help="enable debug mode",
+        action="store_true", default=False)
+    parser.add_option(
+        '-p', '--port',
+        help="which port to serve content on",
+        type='int', default=5000)
+    parser.add_option(
+        '-g', '--gpu',
+        help="use gpu mode",
+        action='store_true', default=False)
+
+    opts, args = parser.parse_args()
+    ImagenetClassifier.default_args.update({'gpu_mode': opts.gpu})
+
+    # Initialize classifier + warm start by forward for allocation
+    app.clf = ImagenetClassifier(**ImagenetClassifier.default_args)
+    app.clf.net.forward()
+
+    if opts.debug:
+        app.run(debug=True, host='0.0.0.0', port=opts.port)
+    else:
+        start_tornado(app, opts.port)
+
+
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.INFO)
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+    start_from_terminal(app)

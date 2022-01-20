@@ -92,4 +92,68 @@ inline bool ReadFileToDatum(const string& filename, Datum* datum) {
 }
 
 bool ReadImageToDatum(const string& filename, const int label,
-    const int height, const int width, 
+    const int height, const int width, const bool is_color,
+    const std::string & encoding, Datum* datum);
+
+inline bool ReadImageToDatum(const string& filename, const int label,
+    const int height, const int width, const bool is_color, Datum* datum) {
+  return ReadImageToDatum(filename, label, height, width, is_color,
+                          "", datum);
+}
+
+inline bool ReadImageToDatum(const string& filename, const int label,
+    const int height, const int width, Datum* datum) {
+  return ReadImageToDatum(filename, label, height, width, true, datum);
+}
+
+inline bool ReadImageToDatum(const string& filename, const int label,
+    const bool is_color, Datum* datum) {
+  return ReadImageToDatum(filename, label, 0, 0, is_color, datum);
+}
+
+inline bool ReadImageToDatum(const string& filename, const int label,
+    Datum* datum) {
+  return ReadImageToDatum(filename, label, 0, 0, true, datum);
+}
+
+inline bool ReadImageToDatum(const string& filename, const int label,
+    const std::string & encoding, Datum* datum) {
+  return ReadImageToDatum(filename, label, 0, 0, true, encoding, datum);
+}
+
+bool DecodeDatumNative(Datum* datum);
+bool DecodeDatum(Datum* datum, bool is_color);
+
+cv::Mat ReadImageToCVMat(const string& filename,
+    const int height, const int width, const bool is_color);
+
+cv::Mat ReadImageToCVMat(const string& filename,
+    const int height, const int width);
+
+cv::Mat ReadImageToCVMat(const string& filename,
+    const bool is_color);
+
+cv::Mat ReadImageToCVMat(const string& filename);
+
+cv::Mat DecodeDatumToCVMatNative(const Datum& datum);
+cv::Mat DecodeDatumToCVMat(const Datum& datum, bool is_color);
+
+void CVMatToDatum(const cv::Mat& cv_img, Datum* datum);
+
+template <typename Dtype>
+void hdf5_load_nd_dataset_helper(
+    hid_t file_id, const char* dataset_name_, int min_dim, int max_dim,
+    Blob<Dtype>* blob);
+
+template <typename Dtype>
+void hdf5_load_nd_dataset(
+    hid_t file_id, const char* dataset_name_, int min_dim, int max_dim,
+    Blob<Dtype>* blob);
+
+template <typename Dtype>
+void hdf5_save_nd_dataset(
+    const hid_t file_id, const string& dataset_name, const Blob<Dtype>& blob);
+
+}  // namespace caffe
+
+#endif   // CAFFE_UTIL_IO_H_

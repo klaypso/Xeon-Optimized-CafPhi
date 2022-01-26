@@ -38,4 +38,35 @@ caffe_get_current_cflags(cflags)
 caffe_parse_linker_libs(Caffe_LINKER_LIBS folders libflags macos_frameworks)
 set(folders $<TARGET_LINKER_FILE_DIR:caffe> ${folders})
 
-# prepare li
+# prepare linker flag lists
+string(REPLACE ";" ";-L" link_folders "-L${folders}")
+string(REPLACE ";" ":"  rpath_folders   "${folders}")
+
+if(build_using MATCHES "Matlab")
+  set(libflags -lcaffe${CAffe_POSTFIX} ${libflags}) # Matlab R2014a complans for -Wl,--whole-archive
+
+  caffe_fetch_and_set_proper_mexext(Matlab_caffe_mex)
+  add_custom_command(OUTPUT ${Matlab_caffe_mex} COMMAND ${Matlab_mex}
+      ARGS -output ${Matlab_caffe_mex} ${Matlab_srcs} ${cflags} ${link_folders} ${libflags}
+      DEPENDS caffe COMMENT "Building Matlab interface: ${Matlab_caffe_mex}" VERBATIM)
+  add_custom_target(matlab ALL DEPENDS ${Matlab_caffe_mex} SOURCES ${Matlab_srcs})
+
+elseif(build_using MATCHES "Octave")
+
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set(libflags -Wl,-force_load,$<TARGET_LINKER_FILE:caffe> ${libflags})
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    set(libflags -Wl,--whole-archive -lcaffe${CAffe_POSTFIX} -Wl,--no-whole-archive ${libflags})
+  endif()
+
+  add_custom_command(OUTPUT ${Matlab_caffe_mex} COMMAND ${Octave_compiler}
+      ARGS --mex -o ${Matlab_caffe_mex} ${Matlab_srcs} ${cflags} ${link_folders} ${libflags} -Wl,-rpath,${rpath_folders}
+      DEPENDS caffe COMMENT "Building Octave interface: ${Matlab_caffe_mex}" VERBATIM)
+
+  add_custom_target(octave ALL DEPENDS ${Matlab_caffe_mex} SOURCES ${Matlab_srcs})
+endif()
+
+# ---[ Install
+file(GLOB mfiles caffe/*.m)
+install(FILES ${mfiles} ${Matlab_caffe_mex} DESTINATION matlab)
+

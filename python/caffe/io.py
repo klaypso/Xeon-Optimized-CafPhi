@@ -138,4 +138,115 @@ class Transformer:
         transpose = self.transpose.get(in_)
         channel_swap = self.channel_swap.get(in_)
         raw_scale = self.raw_scale.get(in_)
-        mean = self.mean.get(in_
+        mean = self.mean.get(in_)
+        input_scale = self.input_scale.get(in_)
+        in_dims = self.inputs[in_][2:]
+        if caffe_in.shape[:2] != in_dims:
+            caffe_in = resize_image(caffe_in, in_dims)
+        if transpose is not None:
+            caffe_in = caffe_in.transpose(transpose)
+        if channel_swap is not None:
+            caffe_in = caffe_in[channel_swap, :, :]
+        if raw_scale is not None:
+            caffe_in *= raw_scale
+        if mean is not None:
+            caffe_in -= mean
+        if input_scale is not None:
+            caffe_in *= input_scale
+        return caffe_in
+
+
+    def deprocess(self, in_, data):
+        """
+        Invert Caffe formatting; see preprocess().
+        """
+        self.__check_input(in_)
+        decaf_in = data.copy().squeeze()
+        transpose = self.transpose.get(in_)
+        channel_swap = self.channel_swap.get(in_)
+        raw_scale = self.raw_scale.get(in_)
+        mean = self.mean.get(in_)
+        input_scale = self.input_scale.get(in_)
+        if input_scale is not None:
+            decaf_in /= input_scale
+        if mean is not None:
+            decaf_in += mean
+        if raw_scale is not None:
+            decaf_in /= raw_scale
+        if channel_swap is not None:
+            decaf_in = decaf_in[channel_swap, :, :]
+        if transpose is not None:
+            decaf_in = decaf_in.transpose([transpose[t] for t in transpose])
+        return decaf_in
+
+
+    def set_transpose(self, in_, order):
+        """
+        Set the input channel order for e.g. RGB to BGR conversion
+        as needed for the reference ImageNet model.
+
+        Take
+        in_: which input to assign this channel order
+        order: the order to transpose the dimensions
+        """
+        self.__check_input(in_)
+        if len(order) != len(self.inputs[in_]) - 1:
+            raise Exception('Transpose order needs to have the same number of '
+                            'dimensions as the input.')
+        self.transpose[in_] = order
+
+
+    def set_channel_swap(self, in_, order):
+        """
+        Set the input channel order for e.g. RGB to BGR conversion
+        as needed for the reference ImageNet model.
+        N.B. this assumes the channels are the first dimension AFTER transpose.
+
+        Take
+        in_: which input to assign this channel order
+        order: the order to take the channels.
+            (2,1,0) maps RGB to BGR for example.
+        """
+        self.__check_input(in_)
+        if len(order) != self.inputs[in_][1]:
+            raise Exception('Channel swap needs to have the same number of '
+                            'dimensions as the input channels.')
+        self.channel_swap[in_] = order
+
+
+    def set_raw_scale(self, in_, scale):
+        """
+        Set the scale of raw features s.t. the input blob = input * scale.
+        While Python represents images in [0, 1], certain Caffe models
+        like CaffeNet and AlexNet represent images in [0, 255] so the raw_scale
+        of these models must be 255.
+
+        Take
+        in_: which input to assign this scale factor
+        scale: scale coefficient
+        """
+        self.__check_input(in_)
+        self.raw_scale[in_] = scale
+
+
+    def set_mean(self, in_, mean):
+        """
+        Set the mean to subtract for centering the data.
+
+        Take
+        in_: which input to assign this mean.
+        mean: mean ndarray (input dimensional or broadcastable)
+        """
+        self.__check_input(in_)
+        ms = mean.shape
+        if mean.ndim == 1:
+            # broadcast channels
+            if ms[0] != self.inputs[in_][1]:
+                raise ValueError('Mean channels incompatible with input.')
+            mean = mean[:, np.newaxis, np.newaxis]
+        else:
+            # elementwise mean
+            if len(ms) == 2:
+                ms = (1,) + ms
+            if len(ms) != 3:
+                raise ValueError('Mean sha

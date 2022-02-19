@@ -216,4 +216,54 @@ def _Net_forward_backward_all(self, blobs=None, diffs=None, **kwargs):
 
 def _Net_set_input_arrays(self, data, labels):
     """
-    Set input arrays of the i
+    Set input arrays of the in-memory MemoryDataLayer.
+    (Note: this is only for networks declared with the memory data layer.)
+    """
+    if labels.ndim == 1:
+        labels = np.ascontiguousarray(labels[:, np.newaxis, np.newaxis,
+                                             np.newaxis])
+    return self._set_input_arrays(data, labels)
+
+
+def _Net_batch(self, blobs):
+    """
+    Batch blob lists according to net's batch size.
+
+    Take
+    blobs: Keys blob names and values are lists of blobs (of any length).
+           Naturally, all the lists should have the same length.
+
+    Give (yield)
+    batch: {blob name: list of blobs} dict for a single batch.
+    """
+    num = len(blobs.itervalues().next())
+    batch_size = self.blobs.itervalues().next().num
+    remainder = num % batch_size
+    num_batches = num / batch_size
+
+    # Yield full batches.
+    for b in range(num_batches):
+        i = b * batch_size
+        yield {name: blobs[name][i:i + batch_size] for name in blobs}
+
+    # Yield last padded batch, if any.
+    if remainder > 0:
+        padded_batch = {}
+        for name in blobs:
+            padding = np.zeros((batch_size - remainder,)
+                               + blobs[name].shape[1:])
+            padded_batch[name] = np.concatenate([blobs[name][-remainder:],
+                                                 padding])
+        yield padded_batch
+
+# Attach methods to Net.
+Net.blobs = _Net_blobs
+Net.params = _Net_params
+Net.forward = _Net_forward
+Net.backward = _Net_backward
+Net.forward_all = _Net_forward_all
+Net.forward_backward_all = _Net_forward_backward_all
+Net.set_input_arrays = _Net_set_input_arrays
+Net._batch = _Net_batch
+Net.inputs = _Net_inputs
+Net.outputs = _Net_outputs

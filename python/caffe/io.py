@@ -366,4 +366,4 @@ def oversample(images, crop_dims):
             crops[ix] = im[crop[0]:crop[2], crop[1]:crop[3], :]
             ix += 1
         crops[ix-5:ix] = crops[ix-5:ix, :, ::-1, :]  # flip for mirrors
-    return
+    return crops

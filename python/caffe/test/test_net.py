@@ -52,4 +52,27 @@ class TestNet(unittest.TestCase):
         # now sum everything (forcing all memory to be read)
         total = 0
         for p in params:
-            total += p.dat
+            total += p.data.sum() + p.diff.sum()
+        for bl in blobs:
+            total += bl.data.sum() + bl.diff.sum()
+
+    def test_forward_backward(self):
+        self.net.forward()
+        self.net.backward()
+
+    def test_inputs_outputs(self):
+        self.assertEqual(self.net.inputs, [])
+        self.assertEqual(self.net.outputs, ['loss'])
+
+    def test_save_and_read(self):
+        f = tempfile.NamedTemporaryFile(delete=False)
+        f.close()
+        self.net.save(f.name)
+        net_file = simple_net_file(self.num_output)
+        net2 = caffe.Net(net_file, f.name, caffe.TRAIN)
+        os.remove(net_file)
+        os.remove(f.name)
+        for name in self.net.params:
+            for i in range(len(self.net.params[name])):
+                self.assertEqual(abs(self.net.params[name][i].data
+                    - net2.params[name][i].data).sum(), 0)

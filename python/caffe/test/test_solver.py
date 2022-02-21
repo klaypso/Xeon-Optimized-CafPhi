@@ -25,4 +25,27 @@ class TestSolver(unittest.TestCase):
                 np.random.randint(self.num_output,
                     size=self.solver.net.blobs['label'].data.shape)
         self.solver.test_nets[0].blobs['label'].data[...] = \
-            
+                np.random.randint(self.num_output,
+                    size=self.solver.test_nets[0].blobs['label'].data.shape)
+        os.remove(f.name)
+        os.remove(net_f)
+
+    def test_solve(self):
+        self.assertEqual(self.solver.iter, 0)
+        self.solver.solve()
+        self.assertEqual(self.solver.iter, 100)
+
+    def test_net_memory(self):
+        """Check that nets survive after the solver is destroyed."""
+
+        nets = [self.solver.net] + list(self.solver.test_nets)
+        self.assertEqual(len(nets), 2)
+        del self.solver
+
+        total = 0
+        for net in nets:
+            for ps in net.params.itervalues():
+                for p in ps:
+                    total += p.data.sum() + p.diff.sum()
+            for bl in net.blobs.itervalues():
+                total += bl.data.sum() + bl.diff.sum()

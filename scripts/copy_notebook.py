@@ -20,4 +20,13 @@ if 'include_in_docs' in content['metadata'] and content['metadata']['include_in_
     yaml_frontmatter = ['---']
     for key, val in content['metadata'].iteritems():
         if key == 'example_name':
- 
+            key = 'title'
+            if val == '':
+                val = os.path.basename(filename)
+        yaml_frontmatter.append('{}: {}'.format(key, val))
+    yaml_frontmatter += ['category: notebook']
+    yaml_frontmatter += ['original_path: ' + filename]
+
+    with open(output_filename, 'w') as fo:
+        fo.write('\n'.join(yaml_frontmatter + ['---']) + '\n')
+        fo.write(open(filename).read())

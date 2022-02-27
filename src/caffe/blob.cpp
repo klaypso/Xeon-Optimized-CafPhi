@@ -226,4 +226,160 @@ Dtype Blob<Dtype>::asum_diff() const {
 #else
     NO_GPU;
 #endif
-  case S
+  case SyncedMemory::UNINITIALIZED:
+    return 0;
+  default:
+    LOG(FATAL) << "Unknown SyncedMemory head state: " << diff_->head();
+  }
+  return 0;
+}
+
+template <> unsigned int Blob<unsigned int>::sumsq_data() const {
+  NOT_IMPLEMENTED;
+  return 0;
+}
+
+template <> int Blob<int>::sumsq_data() const {
+  NOT_IMPLEMENTED;
+  return 0;
+}
+
+template <typename Dtype>
+Dtype Blob<Dtype>::sumsq_data() const {
+  Dtype sumsq;
+  const Dtype* data;
+  if (!data_) { return 0; }
+  switch (data_->head()) {
+  case SyncedMemory::HEAD_AT_CPU:
+    data = cpu_data();
+    sumsq = caffe_cpu_dot(count_, data, data);
+    break;
+  case SyncedMemory::HEAD_AT_GPU:
+  case SyncedMemory::SYNCED:
+#ifndef CPU_ONLY
+    data = gpu_data();
+    caffe_gpu_dot(count_, data, data, &sumsq);
+#else
+    NO_GPU;
+#endif
+    break;
+  case SyncedMemory::UNINITIALIZED:
+    return 0;
+  default:
+    LOG(FATAL) << "Unknown SyncedMemory head state: " << data_->head();
+  }
+  return sumsq;
+}
+
+template <> unsigned int Blob<unsigned int>::sumsq_diff() const {
+  NOT_IMPLEMENTED;
+  return 0;
+}
+
+template <> int Blob<int>::sumsq_diff() const {
+  NOT_IMPLEMENTED;
+  return 0;
+}
+
+template <typename Dtype>
+Dtype Blob<Dtype>::sumsq_diff() const {
+  Dtype sumsq;
+  const Dtype* diff;
+  if (!diff_) { return 0; }
+  switch (diff_->head()) {
+  case SyncedMemory::HEAD_AT_CPU:
+    diff = cpu_diff();
+    sumsq = caffe_cpu_dot(count_, diff, diff);
+    break;
+  case SyncedMemory::HEAD_AT_GPU:
+  case SyncedMemory::SYNCED:
+#ifndef CPU_ONLY
+    diff = gpu_diff();
+    caffe_gpu_dot(count_, diff, diff, &sumsq);
+    break;
+#else
+    NO_GPU;
+#endif
+  case SyncedMemory::UNINITIALIZED:
+    return 0;
+  default:
+    LOG(FATAL) << "Unknown SyncedMemory head state: " << data_->head();
+  }
+  return sumsq;
+}
+
+template <> void Blob<unsigned int>::scale_data(unsigned int scale_factor) {
+  NOT_IMPLEMENTED;
+}
+
+template <> void Blob<int>::scale_data(int scale_factor) {
+  NOT_IMPLEMENTED;
+}
+
+template <typename Dtype>
+void Blob<Dtype>::scale_data(Dtype scale_factor) {
+  Dtype* data;
+  if (!data_) { return; }
+  switch (data_->head()) {
+  case SyncedMemory::HEAD_AT_CPU:
+    data = mutable_cpu_data();
+    caffe_scal(count_, scale_factor, data);
+    return;
+  case SyncedMemory::HEAD_AT_GPU:
+  case SyncedMemory::SYNCED:
+#ifndef CPU_ONLY
+    data = mutable_gpu_data();
+    caffe_gpu_scal(count_, scale_factor, data);
+    return;
+#else
+    NO_GPU;
+#endif
+  case SyncedMemory::UNINITIALIZED:
+    return;
+  default:
+    LOG(FATAL) << "Unknown SyncedMemory head state: " << data_->head();
+  }
+}
+
+template <> void Blob<unsigned int>::scale_diff(unsigned int scale_factor) {
+  NOT_IMPLEMENTED;
+}
+
+template <> void Blob<int>::scale_diff(int scale_factor) {
+  NOT_IMPLEMENTED;
+}
+
+template <typename Dtype>
+void Blob<Dtype>::scale_diff(Dtype scale_factor) {
+  Dtype* diff;
+  if (!diff_) { return; }
+  switch (diff_->head()) {
+  case SyncedMemory::HEAD_AT_CPU:
+    diff = mutable_cpu_diff();
+    caffe_scal(count_, scale_factor, diff);
+    return;
+  case SyncedMemory::HEAD_AT_GPU:
+  case SyncedMemory::SYNCED:
+#ifndef CPU_ONLY
+    diff = mutable_gpu_diff();
+    caffe_gpu_scal(count_, scale_factor, diff);
+    return;
+#else
+    NO_GPU;
+#endif
+  case SyncedMemory::UNINITIALIZED:
+    return;
+  default:
+    LOG(FATAL) << "Unknown SyncedMemory head state: " << diff_->head();
+  }
+}
+
+template <typename Dtype>
+bool Blob<Dtype>::ShapeEquals(const BlobProto& other) {
+  if (other.has_num() || other.has_channels() ||
+      other.has_height() || other.has_width()) {
+    // Using deprecated 4D Blob dimensions --
+    // shape is (num, channels, height, width).
+    // Note: we do not use the normal Blob::num(), Blob::channels(), etc.
+    // methods as these index from the beginning of the blob shape, where legacy
+    // paramet

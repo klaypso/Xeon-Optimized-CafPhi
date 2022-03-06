@@ -382,4 +382,113 @@ bool Blob<Dtype>::ShapeEquals(const BlobProto& other) {
     // shape is (num, channels, height, width).
     // Note: we do not use the normal Blob::num(), Blob::channels(), etc.
     // methods as these index from the beginning of the blob shape, where legacy
-    // paramet
+    // parameter blobs were indexed from the end of the blob shape (e.g., bias
+    // Blob shape (1 x 1 x 1 x N), IP layer weight Blob shape (1 x 1 x M x N)).
+    return shape_.size() <= 4 &&
+           LegacyShape(-4) == other.num() &&
+           LegacyShape(-3) == other.channels() &&
+           LegacyShape(-2) == other.height() &&
+           LegacyShape(-1) == other.width();
+  }
+  vector<int> other_shape(other.shape().dim_size());
+  for (int i = 0; i < other.shape().dim_size(); ++i) {
+    other_shape[i] = other.shape().dim(i);
+  }
+  return shape_ == other_shape;
+}
+
+template <typename Dtype>
+void Blob<Dtype>::CopyFrom(const Blob& source, bool copy_diff, bool reshape) {
+  if (source.count() != count_ || source.shape() != shape_) {
+    if (reshape) {
+      ReshapeLike(source);
+    } else {
+      LOG(FATAL) << "Trying to copy blobs of different sizes.";
+    }
+  }
+  switch (Caffe::mode()) {
+  case Caffe::GPU:
+    if (copy_diff) {
+      caffe_copy(count_, source.gpu_diff(),
+          static_cast<Dtype*>(diff_->mutable_gpu_data()));
+    } else {
+      caffe_copy(count_, source.gpu_data(),
+          static_cast<Dtype*>(data_->mutable_gpu_data()));
+    }
+    break;
+  case Caffe::CPU:
+    if (copy_diff) {
+      caffe_copy(count_, source.cpu_diff(),
+          static_cast<Dtype*>(diff_->mutable_cpu_data()));
+    } else {
+      caffe_copy(count_, source.cpu_data(),
+          static_cast<Dtype*>(data_->mutable_cpu_data()));
+    }
+    break;
+  default:
+    LOG(FATAL) << "Unknown caffe mode.";
+  }
+}
+
+template <typename Dtype>
+void Blob<Dtype>::FromProto(const BlobProto& proto, bool reshape) {
+  if (reshape) {
+    vector<int> shape;
+    if (proto.has_num() || proto.has_channels() ||
+        proto.has_height() || proto.has_width()) {
+      // Using deprecated 4D Blob dimensions --
+      // shape is (num, channels, height, width).
+      shape.resize(4);
+      shape[0] = proto.num();
+      shape[1] = proto.channels();
+      shape[2] = proto.height();
+      shape[3] = proto.width();
+    } else {
+      shape.resize(proto.shape().dim_size());
+      for (int i = 0; i < proto.shape().dim_size(); ++i) {
+        shape[i] = proto.shape().dim(i);
+      }
+    }
+    Reshape(shape);
+  } else {
+    CHECK(ShapeEquals(proto)) << "shape mismatch (reshape not set)";
+  }
+  // copy data
+  Dtype* data_vec = mutable_cpu_data();
+  for (int i = 0; i < count_; ++i) {
+    data_vec[i] = proto.data(i);
+  }
+  if (proto.diff_size() > 0) {
+    Dtype* diff_vec = mutable_cpu_diff();
+    for (int i = 0; i < count_; ++i) {
+      diff_vec[i] = proto.diff(i);
+    }
+  }
+}
+
+template <typename Dtype>
+void Blob<Dtype>::ToProto(BlobProto* proto, bool write_diff) const {
+  proto->clear_shape();
+  for (int i = 0; i < shape_.size(); ++i) {
+    proto->mutable_shape()->add_dim(shape_[i]);
+  }
+  proto->clear_data();
+  proto->clear_diff();
+  const Dtype* data_vec = cpu_data();
+  for (int i = 0; i < count_; ++i) {
+    proto->add_data(data_vec[i]);
+  }
+  if (write_diff) {
+    const Dtype* diff_vec = cpu_diff();
+    for (int i = 0; i < count_; ++i) {
+      proto->add_diff(diff_vec[i]);
+    }
+  }
+}
+
+INSTANTIATE_CLASS(Blob);
+template class Blob<int>;
+template class Blob<unsigned int>;
+
+}  // namespace caffe
+

@@ -56,3 +56,122 @@ shared_ptr<Layer<Dtype> > GetPoolingLayer(const LayerParameter& param) {
                 << "Using Caffe's own pooling layer.";
       return shared_ptr<Layer<Dtype> >(new PoolingLayer<Dtype>(param));
     }
+    return shared_ptr<Layer<Dtype> >(new CuDNNPoolingLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+
+REGISTER_LAYER_CREATOR(Pooling, GetPoolingLayer);
+
+// Get relu layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetReLULayer(const LayerParameter& param) {
+  ReLUParameter_Engine engine = param.relu_param().engine();
+  if (engine == ReLUParameter_Engine_DEFAULT) {
+    engine = ReLUParameter_Engine_CAFFE;
+#ifdef USE_CUDNN
+    engine = ReLUParameter_Engine_CUDNN;
+#endif
+  }
+  if (engine == ReLUParameter_Engine_CAFFE) {
+    return shared_ptr<Layer<Dtype> >(new ReLULayer<Dtype>(param));
+#ifdef USE_CUDNN
+  } else if (engine == ReLUParameter_Engine_CUDNN) {
+    return shared_ptr<Layer<Dtype> >(new CuDNNReLULayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+
+REGISTER_LAYER_CREATOR(ReLU, GetReLULayer);
+
+// Get sigmoid layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetSigmoidLayer(const LayerParameter& param) {
+  SigmoidParameter_Engine engine = param.sigmoid_param().engine();
+  if (engine == SigmoidParameter_Engine_DEFAULT) {
+    engine = SigmoidParameter_Engine_CAFFE;
+#ifdef USE_CUDNN
+    engine = SigmoidParameter_Engine_CUDNN;
+#endif
+  }
+  if (engine == SigmoidParameter_Engine_CAFFE) {
+    return shared_ptr<Layer<Dtype> >(new SigmoidLayer<Dtype>(param));
+#ifdef USE_CUDNN
+  } else if (engine == SigmoidParameter_Engine_CUDNN) {
+    return shared_ptr<Layer<Dtype> >(new CuDNNSigmoidLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+
+REGISTER_LAYER_CREATOR(Sigmoid, GetSigmoidLayer);
+
+// Get softmax layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetSoftmaxLayer(const LayerParameter& param) {
+  SoftmaxParameter_Engine engine = param.softmax_param().engine();
+  if (engine == SoftmaxParameter_Engine_DEFAULT) {
+    engine = SoftmaxParameter_Engine_CAFFE;
+#ifdef USE_CUDNN
+    engine = SoftmaxParameter_Engine_CUDNN;
+#endif
+  }
+  if (engine == SoftmaxParameter_Engine_CAFFE) {
+    return shared_ptr<Layer<Dtype> >(new SoftmaxLayer<Dtype>(param));
+#ifdef USE_CUDNN
+  } else if (engine == SoftmaxParameter_Engine_CUDNN) {
+    return shared_ptr<Layer<Dtype> >(new CuDNNSoftmaxLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+
+REGISTER_LAYER_CREATOR(Softmax, GetSoftmaxLayer);
+
+// Get tanh layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetTanHLayer(const LayerParameter& param) {
+  TanHParameter_Engine engine = param.tanh_param().engine();
+  if (engine == TanHParameter_Engine_DEFAULT) {
+    engine = TanHParameter_Engine_CAFFE;
+#ifdef USE_CUDNN
+    engine = TanHParameter_Engine_CUDNN;
+#endif
+  }
+  if (engine == TanHParameter_Engine_CAFFE) {
+    return shared_ptr<Layer<Dtype> >(new TanHLayer<Dtype>(param));
+#ifdef USE_CUDNN
+  } else if (engine == TanHParameter_Engine_CUDNN) {
+    return shared_ptr<Layer<Dtype> >(new CuDNNTanHLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+
+REGISTER_LAYER_CREATOR(TanH, GetTanHLayer);
+
+#ifdef WITH_PYTHON_LAYER
+template <typename Dtype>
+shared_ptr<Layer<Dtype> > GetPythonLayer(const LayerParameter& param) {
+  Py_Initialize();
+  try {
+    bp::object module = bp::import(param.python_param().module().c_str());
+    bp::object layer = module.attr(param.python_param().layer().c_str())(param);
+    return bp::extract<shared_ptr<PythonLayer<Dtype> > >(layer)();
+  } catch (bp::error_already_set) {
+    PyErr_Print();
+    throw;
+  }
+}
+
+REGISTER_LAYER_CREATOR(Python, GetPythonLayer);
+#endif
+
+// La

@@ -50,4 +50,11 @@ void BNLLLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
     // NOLINT_NEXT_LINE(whitespace/operators)
     BNLLBackward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count, top_diff, bottom_data, bottom_diff);
- 
+    CUDA_POST_KERNEL_CHECK;
+  }
+}
+
+INSTANTIATE_LAYER_GPU_FUNCS(BNLLLayer);
+
+
+}  // namespace caffe

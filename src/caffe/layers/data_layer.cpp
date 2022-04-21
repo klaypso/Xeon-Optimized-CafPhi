@@ -128,4 +128,42 @@ void DataLayer<Dtype>::InternalThreadEntry() {
       } else {
         cv_img = DecodeDatumToCVMatNative(datum);
       }
-      if (cv_img.channels() != this->tran
+      if (cv_img.channels() != this->transformed_data_.channels()) {
+        LOG(WARNING) << "Your dataset contains encoded images with mixed "
+        << "channel sizes. Consider adding a 'force_color' flag to the "
+        << "model definition, or rebuild your dataset using "
+        << "convert_imageset.";
+      }
+    }
+    read_time += timer.MicroSeconds();
+    timer.Start();
+
+    // Apply data transformations (mirror, scale, crop...)
+    int offset = this->prefetch_data_.offset(item_id);
+    this->transformed_data_.set_cpu_data(top_data + offset);
+    if (datum.encoded()) {
+      this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
+    } else {
+      this->data_transformer_->Transform(datum, &(this->transformed_data_));
+    }
+    if (this->output_labels_) {
+      top_label[item_id] = datum.label();
+    }
+    trans_time += timer.MicroSeconds();
+    // go to the next iter
+    cursor_->Next();
+    if (!cursor_->valid()) {
+      DLOG(INFO) << "Restarting data prefetching from start.";
+      cursor_->SeekToFirst();
+    }
+  }
+  batch_timer.Stop();
+  DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
+  DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
+  DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
+}
+
+INSTANTIATE_CLASS(DataLayer);
+REGISTER_LAYER_CLASS(Data);
+
+}  // namespace caffe

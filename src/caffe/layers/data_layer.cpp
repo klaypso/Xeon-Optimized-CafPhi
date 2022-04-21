@@ -26,4 +26,106 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
   // Initialize DB
   db_.reset(db::GetDB(this->layer_param_.data_param().backend()));
-  db_->Open(this->layer_param_.
+  db_->Open(this->layer_param_.data_param().source(), db::READ);
+  cursor_.reset(db_->NewCursor());
+
+  // Check if we should randomly skip a few data points
+  if (this->layer_param_.data_param().rand_skip()) {
+    unsigned int skip = caffe_rng_rand() %
+                        this->layer_param_.data_param().rand_skip();
+    LOG(INFO) << "Skipping first " << skip << " data points.";
+    while (skip-- > 0) {
+      cursor_->Next();
+    }
+  }
+  // Read a data point, and use it to initialize the top blob.
+  Datum datum;
+  datum.ParseFromString(cursor_->value());
+
+  bool force_color = this->layer_param_.data_param().force_encoded_color();
+  if ((force_color && DecodeDatum(&datum, true)) ||
+      DecodeDatumNative(&datum)) {
+    LOG(INFO) << "Decoding Datum";
+  }
+  // image
+  int crop_size = this->layer_param_.transform_param().crop_size();
+#ifdef XEON_PHI_DEBUG  
+  LOG(INFO) << "XEON: crop_size:" << crop_size;
+#endif
+  if (crop_size > 0) {
+    top[0]->Reshape(this->layer_param_.data_param().batch_size(),
+        datum.channels(), crop_size, crop_size);
+    this->prefetch_data_.Reshape(this->layer_param_.data_param().batch_size(),
+        datum.channels(), crop_size, crop_size);
+    this->transformed_data_.Reshape(1, datum.channels(), crop_size, crop_size);
+  } else {
+    top[0]->Reshape(
+        this->layer_param_.data_param().batch_size(), datum.channels(),
+        datum.height(), datum.width());
+    this->prefetch_data_.Reshape(this->layer_param_.data_param().batch_size(),
+        datum.channels(), datum.height(), datum.width());
+    this->transformed_data_.Reshape(1, datum.channels(),
+      datum.height(), datum.width());
+  }
+  LOG(INFO) << "output data size: " << top[0]->num() << ","
+      << top[0]->channels() << "," << top[0]->height() << ","
+      << top[0]->width();
+  // label
+  if (this->output_labels_) {
+    vector<int> label_shape(1, this->layer_param_.data_param().batch_size());
+    top[1]->Reshape(label_shape);
+    this->prefetch_label_.Reshape(label_shape);
+  }
+}
+
+// This function is used to create a thread that prefetches the data.
+template <typename Dtype>
+void DataLayer<Dtype>::InternalThreadEntry() {
+  CPUTimer batch_timer;
+  batch_timer.Start();
+  double read_time = 0;
+  double trans_time = 0;
+  CPUTimer timer;
+  CHECK(this->prefetch_data_.count());
+  CHECK(this->transformed_data_.count());
+
+  // Reshape on single input batches for inputs of varying dimension.
+  const int batch_size = this->layer_param_.data_param().batch_size();
+  const int crop_size = this->layer_param_.transform_param().crop_size();
+  bool force_color = this->layer_param_.data_param().force_encoded_color();
+  if (batch_size == 1 && crop_size == 0) {
+    Datum datum;
+    datum.ParseFromString(cursor_->value());
+    if (datum.encoded()) {
+      if (force_color) {
+        DecodeDatum(&datum, true);
+      } else {
+        DecodeDatumNative(&datum);
+      }
+    }
+    this->prefetch_data_.Reshape(1, datum.channels(),
+        datum.height(), datum.width());
+    this->transformed_data_.Reshape(1, datum.channels(),
+        datum.height(), datum.width());
+  }
+
+  Dtype* top_data = this->prefetch_data_.mutable_cpu_data();
+  Dtype* top_label = NULL;  // suppress warnings about uninitialized variables
+
+  if (this->output_labels_) {
+    top_label = this->prefetch_label_.mutable_cpu_data();
+  }
+  for (int item_id = 0; item_id < batch_size; ++item_id) {
+    timer.Start();
+    // get a blob
+    Datum datum;
+    datum.ParseFromString(cursor_->value());
+
+    cv::Mat cv_img;
+    if (datum.encoded()) {
+      if (force_color) {
+        cv_img = DecodeDatumToCVMat(datum, true);
+      } else {
+        cv_img = DecodeDatumToCVMatNative(datum);
+      }
+      if (cv_img.channels() != this->tran

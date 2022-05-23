@@ -150,4 +150,50 @@ __global__ void LRNComputeDiff(const int nthreads, const Dtype* bottom_data,
     while (head < channels) {
       accum_ratio += top_diff[head * step] * top_data[head * step] /
           scale[head * step];
-      if (
+      if (head - size >= 0) {
+        accum_ratio -= top_diff[(head - size) * step] *
+            top_data[(head - size) * step] / scale[(head - size) * step];
+      }
+      bottom_diff[(head - post_pad) * step] = top_diff[(head - post_pad) * step]
+          * pow(scale[(head - post_pad) * step], negative_beta) - cache_ratio *
+          bottom_data[(head - post_pad) * step] * accum_ratio;
+      ++head;
+    }
+    // subtract only
+    while (head < channels + post_pad) {
+      if (head - size >= 0) {
+        accum_ratio -= top_diff[(head - size) * step] *
+            top_data[(head - size) * step] / scale[(head - size) * step];
+      }
+      bottom_diff[(head - post_pad) * step] = top_diff[(head - post_pad) * step]
+          * pow(scale[(head - post_pad) * step], negative_beta) - cache_ratio *
+          bottom_data[(head - post_pad) * step] * accum_ratio;
+      ++head;
+    }
+  }
+}
+
+template <typename Dtype>
+void LRNLayer<Dtype>::CrossChannelBackward_gpu(
+    const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down,
+    const vector<Blob<Dtype>*>& bottom) {
+  int n_threads = num_ * height_ * width_;
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  LRNComputeDiff<<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS>>>(
+      n_threads, bottom[0]->gpu_data(), top[0]->gpu_data(),
+      scale_.gpu_data(), top[0]->gpu_diff(), num_, channels_, height_, width_,
+      size_, -beta_, Dtype(2. * alpha_ * beta_ / size_),
+      bottom[0]->mutable_gpu_diff());
+}
+template void LRNLayer<float>::CrossChannelBackward_gpu(
+    const vector<Blob<float>*>& top, const vector<bool>& propagate_down,
+    const vector<Blob<float>*>& bottom);
+template void LRNLayer<double>::CrossChannelBackward_gpu(
+    const vector<Blob<double>*>& top, const vector<bool>& propagate_down,
+    const vector<Blob<double>*>& bottom);
+
+
+
+INSTANTIATE_LAYER_GPU_FUNCS(LRNLayer);
+
+}  // namespace caffe

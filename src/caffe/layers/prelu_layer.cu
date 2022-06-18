@@ -87,4 +87,44 @@ void PReLULayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
     Dtype dsum = 0.;
     for (int n = 0; n < bottom[0]->num(); ++n) {
       Dtype* temp_buff = multiplier_.mutable_gpu_diff();
-   
+      // compute element-wise diff
+      // NOLINT_NEXT_LINE(whitespace/operators)
+      PReLUParamBackward<Dtype><<<CAFFE_GET_BLOCKS(count),
+          CAFFE_CUDA_NUM_THREADS>>>(
+          cdim, top_diff + top[0]->offset(n),
+          bottom_data + bottom[0]->offset(n), multiplier_.mutable_gpu_diff());
+      CUDA_POST_KERNEL_CHECK;
+      if (channel_shared_) {
+        Dtype d;
+        caffe_gpu_dot<Dtype>(channels * dim, multiplier_.gpu_diff(),
+            multiplier_.gpu_data(), &d);
+        dsum += d;
+      } else {
+        caffe_gpu_gemv<Dtype>(CblasNoTrans, channels, dim, 1.,
+            multiplier_.gpu_diff(), multiplier_.gpu_data(), 1.,
+            slope_diff);
+      }
+    }
+    if (channel_shared_) {
+      caffe_gpu_set(this->blobs_[0]->count(), Dtype(dsum), slope_diff);
+    }
+  }
+  // Propagate to bottom
+  if (propagate_down[0]) {
+    Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
+    const Dtype* slope_data = this->blobs_[0]->gpu_data();
+    int div_factor = channel_shared_ ? channels : 1;
+    // NOLINT_NEXT_LINE(whitespace/operators)
+    PReLUBackward<Dtype><<<CAFFE_GET_BLOCKS(count),
+        CAFFE_CUDA_NUM_THREADS>>>(
+        count, channels, dim, top_diff, bottom_data, bottom_diff, slope_data,
+        div_factor);
+    CUDA_POST_KERNEL_CHECK;
+  }
+}
+
+
+INSTANTIATE_LAYER_GPU_FUNCS(PReLULayer);
+
+
+}  // namespace caffe

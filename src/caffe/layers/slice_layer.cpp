@@ -103,4 +103,18 @@ void SliceLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       const int top_offset = n * top_slice_axis * slice_size_;
       const int bottom_offset =
           (n * bottom_slice_axis + offset_slice_axis) * slice_size_;
-      ca
+      caffe_copy(top_slice_axis * slice_size_,
+          top_diff + top_offset, bottom_diff + bottom_offset);
+    }
+    offset_slice_axis += top_slice_axis;
+  }
+}
+
+#ifdef CPU_ONLY
+STUB_GPU(SliceLayer);
+#endif
+
+INSTANTIATE_CLASS(SliceLayer);
+REGISTER_LAYER_CLASS(Slice);
+
+}  // namespace caffe

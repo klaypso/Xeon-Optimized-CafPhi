@@ -86,4 +86,14 @@ void SoftmaxLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
         -1., sum_multiplier_.cpu_data(), scale_data, 1., bottom_diff + i * dim);
   }
   // elementwise multiplication
-  caffe_mul(top[0]
+  caffe_mul(top[0]->count(), bottom_diff, top_data, bottom_diff);
+}
+
+
+#ifdef CPU_ONLY
+STUB_GPU(SoftmaxLayer);
+#endif
+
+INSTANTIATE_CLASS(SoftmaxLayer);
+
+}  // namespace caffe

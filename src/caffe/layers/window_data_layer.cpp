@@ -231,4 +231,100 @@ void WindowDataLayer<Dtype>::InternalThreadEntry() {
   Dtype* top_label = this->prefetch_label_.mutable_cpu_data();
   const Dtype scale = this->layer_param_.window_data_param().scale();
   const int batch_size = this->layer_param_.window_data_param().batch_size();
-  const int context_pad = this->layer_param_.window_data_para
+  const int context_pad = this->layer_param_.window_data_param().context_pad();
+  const int crop_size = this->transform_param_.crop_size();
+  const bool mirror = this->transform_param_.mirror();
+  const float fg_fraction =
+      this->layer_param_.window_data_param().fg_fraction();
+  Dtype* mean = NULL;
+  int mean_off = 0;
+  int mean_width = 0;
+  int mean_height = 0;
+  if (this->has_mean_file_) {
+    mean = this->data_mean_.mutable_cpu_data();
+    mean_off = (this->data_mean_.width() - crop_size) / 2;
+    mean_width = this->data_mean_.width();
+    mean_height = this->data_mean_.height();
+  }
+  cv::Size cv_crop_size(crop_size, crop_size);
+  const string& crop_mode = this->layer_param_.window_data_param().crop_mode();
+
+  bool use_square = (crop_mode == "square") ? true : false;
+
+  // zero out batch
+  caffe_set(this->prefetch_data_.count(), Dtype(0), top_data);
+
+  const int num_fg = static_cast<int>(static_cast<float>(batch_size)
+      * fg_fraction);
+  const int num_samples[2] = { batch_size - num_fg, num_fg };
+
+  int item_id = 0;
+  // sample from bg set then fg set
+  for (int is_fg = 0; is_fg < 2; ++is_fg) {
+    for (int dummy = 0; dummy < num_samples[is_fg]; ++dummy) {
+      // sample a window
+      timer.Start();
+      const unsigned int rand_index = PrefetchRand();
+      vector<float> window = (is_fg) ?
+          fg_windows_[rand_index % fg_windows_.size()] :
+          bg_windows_[rand_index % bg_windows_.size()];
+
+      bool do_mirror = mirror && PrefetchRand() % 2;
+
+      // load the image containing the window
+      pair<std::string, vector<int> > image =
+          image_database_[window[WindowDataLayer<Dtype>::IMAGE_INDEX]];
+
+      cv::Mat cv_img;
+      if (this->cache_images_) {
+        pair<std::string, Datum> image_cached =
+          image_database_cache_[window[WindowDataLayer<Dtype>::IMAGE_INDEX]];
+        cv_img = DecodeDatumToCVMat(image_cached.second, true);
+      } else {
+        cv_img = cv::imread(image.first, CV_LOAD_IMAGE_COLOR);
+        if (!cv_img.data) {
+          LOG(ERROR) << "Could not open or find file " << image.first;
+          return;
+        }
+      }
+      read_time += timer.MicroSeconds();
+      timer.Start();
+      const int channels = cv_img.channels();
+
+      // crop window out of image and warp it
+      int x1 = window[WindowDataLayer<Dtype>::X1];
+      int y1 = window[WindowDataLayer<Dtype>::Y1];
+      int x2 = window[WindowDataLayer<Dtype>::X2];
+      int y2 = window[WindowDataLayer<Dtype>::Y2];
+
+      int pad_w = 0;
+      int pad_h = 0;
+      if (context_pad > 0 || use_square) {
+        // scale factor by which to expand the original region
+        // such that after warping the expanded region to crop_size x crop_size
+        // there's exactly context_pad amount of padding on each side
+        Dtype context_scale = static_cast<Dtype>(crop_size) /
+            static_cast<Dtype>(crop_size - 2*context_pad);
+
+        // compute the expanded region
+        Dtype half_height = static_cast<Dtype>(y2-y1+1)/2.0;
+        Dtype half_width = static_cast<Dtype>(x2-x1+1)/2.0;
+        Dtype center_x = static_cast<Dtype>(x1) + half_width;
+        Dtype center_y = static_cast<Dtype>(y1) + half_height;
+        if (use_square) {
+          if (half_height > half_width) {
+            half_width = half_height;
+          } else {
+            half_height = half_width;
+          }
+        }
+        x1 = static_cast<int>(round(center_x - half_width*context_scale));
+        x2 = static_cast<int>(round(center_x + half_width*context_scale));
+        y1 = static_cast<int>(round(center_y - half_height*context_scale));
+        y2 = static_cast<int>(round(center_y + half_height*context_scale));
+
+        // the expanded region may go outside of the image
+        // so we compute the clipped (expanded) region and keep track of
+        // the extent beyond the image
+        int unclipped_height = y2-y1+1;
+        int unclipped

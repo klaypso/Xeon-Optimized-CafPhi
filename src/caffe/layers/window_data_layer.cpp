@@ -327,4 +327,102 @@ void WindowDataLayer<Dtype>::InternalThreadEntry() {
         // so we compute the clipped (expanded) region and keep track of
         // the extent beyond the image
         int unclipped_height = y2-y1+1;
-        int unclipped
+        int unclipped_width = x2-x1+1;
+        int pad_x1 = std::max(0, -x1);
+        int pad_y1 = std::max(0, -y1);
+        int pad_x2 = std::max(0, x2 - cv_img.cols + 1);
+        int pad_y2 = std::max(0, y2 - cv_img.rows + 1);
+        // clip bounds
+        x1 = x1 + pad_x1;
+        x2 = x2 - pad_x2;
+        y1 = y1 + pad_y1;
+        y2 = y2 - pad_y2;
+        CHECK_GT(x1, -1);
+        CHECK_GT(y1, -1);
+        CHECK_LT(x2, cv_img.cols);
+        CHECK_LT(y2, cv_img.rows);
+
+        int clipped_height = y2-y1+1;
+        int clipped_width = x2-x1+1;
+
+        // scale factors that would be used to warp the unclipped
+        // expanded region
+        Dtype scale_x =
+            static_cast<Dtype>(crop_size)/static_cast<Dtype>(unclipped_width);
+        Dtype scale_y =
+            static_cast<Dtype>(crop_size)/static_cast<Dtype>(unclipped_height);
+
+        // size to warp the clipped expanded region to
+        cv_crop_size.width =
+            static_cast<int>(round(static_cast<Dtype>(clipped_width)*scale_x));
+        cv_crop_size.height =
+            static_cast<int>(round(static_cast<Dtype>(clipped_height)*scale_y));
+        pad_x1 = static_cast<int>(round(static_cast<Dtype>(pad_x1)*scale_x));
+        pad_x2 = static_cast<int>(round(static_cast<Dtype>(pad_x2)*scale_x));
+        pad_y1 = static_cast<int>(round(static_cast<Dtype>(pad_y1)*scale_y));
+        pad_y2 = static_cast<int>(round(static_cast<Dtype>(pad_y2)*scale_y));
+
+        pad_h = pad_y1;
+        // if we're mirroring, we mirror the padding too (to be pedantic)
+        if (do_mirror) {
+          pad_w = pad_x2;
+        } else {
+          pad_w = pad_x1;
+        }
+
+        // ensure that the warped, clipped region plus the padding fits in the
+        // crop_size x crop_size image (it might not due to rounding)
+        if (pad_h + cv_crop_size.height > crop_size) {
+          cv_crop_size.height = crop_size - pad_h;
+        }
+        if (pad_w + cv_crop_size.width > crop_size) {
+          cv_crop_size.width = crop_size - pad_w;
+        }
+      }
+
+      cv::Rect roi(x1, y1, x2-x1+1, y2-y1+1);
+      cv::Mat cv_cropped_img = cv_img(roi);
+      cv::resize(cv_cropped_img, cv_cropped_img,
+          cv_crop_size, 0, 0, cv::INTER_LINEAR);
+
+      // horizontal flip at random
+      if (do_mirror) {
+        cv::flip(cv_cropped_img, cv_cropped_img, 1);
+      }
+
+      // copy the warped window into top_data
+      for (int h = 0; h < cv_cropped_img.rows; ++h) {
+        const uchar* ptr = cv_cropped_img.ptr<uchar>(h);
+        int img_index = 0;
+        for (int w = 0; w < cv_cropped_img.cols; ++w) {
+          for (int c = 0; c < channels; ++c) {
+            int top_index = ((item_id * channels + c) * crop_size + h + pad_h)
+                     * crop_size + w + pad_w;
+            // int top_index = (c * height + h) * width + w;
+            Dtype pixel = static_cast<Dtype>(ptr[img_index++]);
+            if (this->has_mean_file_) {
+              int mean_index = (c * mean_height + h + mean_off + pad_h)
+                           * mean_width + w + mean_off + pad_w;
+              top_data[top_index] = (pixel - mean[mean_index]) * scale;
+            } else {
+              if (this->has_mean_values_) {
+                top_data[top_index] = (pixel - this->mean_values_[c]) * scale;
+              } else {
+                top_data[top_index] = pixel * scale;
+              }
+            }
+          }
+        }
+      }
+      trans_time += timer.MicroSeconds();
+      // get window label
+      top_label[item_id] = window[WindowDataLayer<Dtype>::LABEL];
+
+      #if 0
+      // useful debugging code for dumping transformed windows to disk
+      string file_id;
+      std::stringstream ss;
+      ss << PrefetchRand();
+      ss >> file_id;
+      std::ofstream inf((string("dump/") + file_id +
+          string("_i

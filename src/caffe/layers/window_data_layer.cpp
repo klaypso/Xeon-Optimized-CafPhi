@@ -425,4 +425,42 @@ void WindowDataLayer<Dtype>::InternalThreadEntry() {
       ss << PrefetchRand();
       ss >> file_id;
       std::ofstream inf((string("dump/") + file_id +
-          string("_i
+          string("_info.txt")).c_str(), std::ofstream::out);
+      inf << image.first << std::endl
+          << window[WindowDataLayer<Dtype>::X1]+1 << std::endl
+          << window[WindowDataLayer<Dtype>::Y1]+1 << std::endl
+          << window[WindowDataLayer<Dtype>::X2]+1 << std::endl
+          << window[WindowDataLayer<Dtype>::Y2]+1 << std::endl
+          << do_mirror << std::endl
+          << top_label[item_id] << std::endl
+          << is_fg << std::endl;
+      inf.close();
+      std::ofstream top_data_file((string("dump/") + file_id +
+          string("_data.txt")).c_str(),
+          std::ofstream::out | std::ofstream::binary);
+      for (int c = 0; c < channels; ++c) {
+        for (int h = 0; h < crop_size; ++h) {
+          for (int w = 0; w < crop_size; ++w) {
+            top_data_file.write(reinterpret_cast<char*>(
+                &top_data[((item_id * channels + c) * crop_size + h)
+                          * crop_size + w]),
+                sizeof(Dtype));
+          }
+        }
+      }
+      top_data_file.close();
+      #endif
+
+      item_id++;
+    }
+  }
+  batch_timer.Stop();
+  DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
+  DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
+  DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
+}
+
+INSTANTIATE_CLASS(WindowDataLayer);
+REGISTER_LAYER_CLASS(WindowData);
+
+}  // namespace caffe

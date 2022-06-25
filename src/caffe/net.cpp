@@ -141,4 +141,92 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     for (int param_id = 0; param_id < num_param_blobs; ++param_id) {
       AppendParam(param, layer_id, param_id);
     }
-    //
+    // Finally, set the backward flag
+    layer_need_backward_.push_back(need_backward);
+    if (need_backward) {
+      for (int top_id = 0; top_id < top_id_vecs_[layer_id].size(); ++top_id) {
+        blob_need_backward_[top_id_vecs_[layer_id][top_id]] = true;
+      }
+    }
+  }
+  // Go through the net backwards to determine which blobs contribute to the
+  // loss.  We can skip backward computation for blobs that don't contribute
+  // to the loss.
+  set<string> blobs_under_loss;
+  for (int layer_id = layers_.size() - 1; layer_id >= 0; --layer_id) {
+    bool layer_contributes_loss = false;
+    for (int top_id = 0; top_id < top_vecs_[layer_id].size(); ++top_id) {
+      const string& blob_name = blob_names_[top_id_vecs_[layer_id][top_id]];
+      if (layers_[layer_id]->loss(top_id) ||
+          (blobs_under_loss.find(blob_name) != blobs_under_loss.end())) {
+        layer_contributes_loss = true;
+        break;
+      }
+    }
+    if (!layer_contributes_loss) { layer_need_backward_[layer_id] = false; }
+    if (layer_need_backward_[layer_id]) {
+      LOG(INFO) << layer_names_[layer_id] << " needs backward computation.";
+    } else {
+      LOG(INFO) << layer_names_[layer_id]
+                << " does not need backward computation.";
+    }
+    for (int bottom_id = 0; bottom_id < bottom_vecs_[layer_id].size();
+         ++bottom_id) {
+      if (layer_contributes_loss) {
+        const string& blob_name =
+            blob_names_[bottom_id_vecs_[layer_id][bottom_id]];
+        blobs_under_loss.insert(blob_name);
+      } else {
+        bottom_need_backward_[layer_id][bottom_id] = false;
+      }
+    }
+  }
+  // Handle force_backward if needed.
+  if (param.force_backward()) {
+    for (int layer_id = 0; layer_id < layers_.size(); ++layer_id) {
+      layer_need_backward_[layer_id] = true;
+      for (int bottom_id = 0;
+           bottom_id < bottom_need_backward_[layer_id].size(); ++bottom_id) {
+        bottom_need_backward_[layer_id][bottom_id] =
+            bottom_need_backward_[layer_id][bottom_id] ||
+            layers_[layer_id]->AllowForceBackward(bottom_id);
+        blob_need_backward_[bottom_id_vecs_[layer_id][bottom_id]] =
+            blob_need_backward_[bottom_id_vecs_[layer_id][bottom_id]] ||
+            bottom_need_backward_[layer_id][bottom_id];
+      }
+      for (int param_id = 0; param_id < layers_[layer_id]->blobs().size();
+           ++param_id) {
+        layers_[layer_id]->set_param_propagate_down(param_id, true);
+      }
+    }
+  }
+  // In the end, all remaining blobs are considered output blobs.
+  for (set<string>::iterator it = available_blobs.begin();
+      it != available_blobs.end(); ++it) {
+    LOG(INFO) << "This network produces output " << *it;
+    net_output_blobs_.push_back(blobs_[blob_name_to_idx[*it]].get());
+    net_output_blob_indices_.push_back(blob_name_to_idx[*it]);
+  }
+  for (size_t blob_id = 0; blob_id < blob_names_.size(); ++blob_id) {
+    blob_names_index_[blob_names_[blob_id]] = blob_id;
+  }
+  for (size_t layer_id = 0; layer_id < layer_names_.size(); ++layer_id) {
+    layer_names_index_[layer_names_[layer_id]] = layer_id;
+  }
+  GetLearningRateAndWeightDecay();
+  debug_info_ = param.debug_info();
+  LOG(INFO) << "Network initialization done.";
+  LOG(INFO) << "Memory required for data: " << memory_used_ * sizeof(Dtype);
+}
+
+template <typename Dtype>
+void Net<Dtype>::FilterNet(const NetParameter& param,
+    NetParameter* param_filtered) {
+  NetState net_state(param.state());
+  param_filtered->CopyFrom(param);
+  param_filtered->clear_layer();
+  for (int i = 0; i < param.layer_size(); ++i) {
+    const LayerParameter& layer_param = param.layer(i);
+    const string& layer_name = layer_param.name();
+    CHECK(layer_param.include_size() == 0 || layer_param.exclude_size() == 0)
+          << "Specify either include rules or 

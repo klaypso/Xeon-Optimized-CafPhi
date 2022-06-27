@@ -319,4 +319,88 @@ void Net<Dtype>::AppendTop(const NetParameter& param, const int layer_id,
   shared_ptr<LayerParameter> layer_param((layer_id >= 0) ?
     (new LayerParameter(param.layer(layer_id))) : NULL);
   const string& blob_name = layer_param ?
-      (layer_param->top_size() > top_
+      (layer_param->top_size() > top_id ?
+          layer_param->top(top_id) : "(automatic)") : param.input(top_id);
+  // Check if we are doing in-place computation
+  if (blob_name_to_idx && layer_param && layer_param->bottom_size() > top_id &&
+      blob_name == layer_param->bottom(top_id)) {
+    // In-place computation
+    LOG(INFO) << layer_param->name() << " -> " << blob_name << " (in-place)";
+    top_vecs_[layer_id].push_back(blobs_[(*blob_name_to_idx)[blob_name]].get());
+    top_id_vecs_[layer_id].push_back((*blob_name_to_idx)[blob_name]);
+  } else if (blob_name_to_idx &&
+             blob_name_to_idx->find(blob_name) != blob_name_to_idx->end()) {
+    // If we are not doing in-place computation but have duplicated blobs,
+    // raise an error.
+    LOG(FATAL) << "Duplicate blobs produced by multiple sources.";
+  } else {
+    // Normal output.
+    if (layer_param) {
+      LOG(INFO) << layer_param->name() << " -> " << blob_name;
+    } else {
+      LOG(INFO) << "Input " << top_id << " -> " << blob_name;
+    }
+    shared_ptr<Blob<Dtype> > blob_pointer(new Blob<Dtype>());
+    const int blob_id = blobs_.size();
+    blobs_.push_back(blob_pointer);
+    blob_names_.push_back(blob_name);
+    blob_need_backward_.push_back(false);
+    if (blob_name_to_idx) { (*blob_name_to_idx)[blob_name] = blob_id; }
+    if (layer_id == -1) {
+      // Set the (explicitly specified) dimensions of the input blob.
+      if (param.input_dim_size() > 0) {
+        blob_pointer->Reshape(param.input_dim(top_id * 4),
+                              param.input_dim(top_id * 4 + 1),
+                              param.input_dim(top_id * 4 + 2),
+                              param.input_dim(top_id * 4 + 3));
+      } else {
+        blob_pointer->Reshape(param.input_shape(top_id));
+      }
+      net_input_blob_indices_.push_back(blob_id);
+      net_input_blobs_.push_back(blob_pointer.get());
+    } else {
+      top_id_vecs_[layer_id].push_back(blob_id);
+      top_vecs_[layer_id].push_back(blob_pointer.get());
+    }
+  }
+  if (available_blobs) { available_blobs->insert(blob_name); }
+}
+
+// Helper for Net::Init: add a new bottom blob to the net.
+template <typename Dtype>
+int Net<Dtype>::AppendBottom(const NetParameter& param,
+    const int layer_id, const int bottom_id,
+    set<string>* available_blobs, map<string, int>* blob_name_to_idx) {
+  const LayerParameter& layer_param = param.layer(layer_id);
+  const string& blob_name = layer_param.bottom(bottom_id);
+  if (available_blobs->find(blob_name) == available_blobs->end()) {
+    LOG(FATAL) << "Unknown blob input " << blob_name
+               << " (at index " << bottom_id << ") to layer " << layer_id;
+  }
+  const int blob_id = (*blob_name_to_idx)[blob_name];
+  LOG(INFO) << layer_names_[layer_id] << " <- " << blob_name;
+  bottom_vecs_[layer_id].push_back(blobs_[blob_id].get());
+  bottom_id_vecs_[layer_id].push_back(blob_id);
+  available_blobs->erase(blob_name);
+  const bool need_backward = blob_need_backward_[blob_id];
+  bottom_need_backward_[layer_id].push_back(need_backward);
+  return blob_id;
+}
+
+template <typename Dtype>
+void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
+                             const int param_id) {
+  const LayerParameter& layer_param = layers_[layer_id]->layer_param();
+  const int param_size = layer_param.param_size();
+  string param_name =
+      (param_size > param_id) ? layer_param.param(param_id).name() : "";
+  if (param_name.size()) {
+    param_display_names_.push_back(param_name);
+  } else {
+    ostringstream param_display_name;
+    param_display_name << param_id;
+    param_display_names_.push_back(param_display_name.str());
+  }
+  const int net_param_id = params_.size();
+  params_.push_back(layers_[layer_id]->blobs()[param_id]);
+  param_id_vecs_[

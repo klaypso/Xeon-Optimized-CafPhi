@@ -403,4 +403,100 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
   }
   const int net_param_id = params_.size();
   params_.push_back(layers_[layer_id]->blobs()[param_id]);
-  param_id_vecs_[
+  param_id_vecs_[layer_id].push_back(net_param_id);
+  param_layer_indices_.push_back(make_pair(layer_id, param_id));
+  if (!param_size || !param_name.size() || (param_name.size() &&
+      param_names_index_.find(param_name) == param_names_index_.end())) {
+    // This layer "owns" this parameter blob -- it is either anonymous
+    // (i.e., not given a param_name) or explicitly given a name that we
+    // haven't already seen.
+    param_owners_.push_back(-1);
+    if (param_size) {
+      param_names_index_[param_name] = net_param_id;
+    }
+  } else {
+    // Named param blob with name we've seen before: share params
+    const int owner_net_param_id = param_names_index_[param_name];
+    param_owners_.push_back(owner_net_param_id);
+    const pair<int, int>& owner_index =
+        param_layer_indices_[owner_net_param_id];
+    const int owner_layer_id = owner_index.first;
+    const int owner_param_id = owner_index.second;
+    LOG(INFO) << "Sharing parameters '" << param_name << "' owned by "
+              << "layer '" << layer_names_[owner_layer_id] << "', param "
+              << "index " << owner_param_id;
+    Blob<Dtype>* this_blob = layers_[layer_id]->blobs()[param_id].get();
+    Blob<Dtype>* owner_blob =
+        layers_[owner_layer_id]->blobs()[owner_param_id].get();
+    const int param_size = layer_param.param_size();
+    if (param_size > param_id && (layer_param.param(param_id).share_mode() ==
+                                  ParamSpec_DimCheckMode_PERMISSIVE)) {
+      // Permissive dimension checking -- only check counts are the same.
+      CHECK_EQ(this_blob->count(), owner_blob->count())
+          << "Shared parameter blobs must have the same count.";
+    } else {
+      // Strict dimension checking -- all dims must be the same.
+      CHECK(this_blob->shape() == owner_blob->shape());
+    }
+    layers_[layer_id]->blobs()[param_id]->ShareData(
+        *layers_[owner_layer_id]->blobs()[owner_param_id]);
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::GetLearningRateAndWeightDecay() {
+  LOG(INFO) << "Collecting Learning Rate and Weight Decay.";
+  ParamSpec default_param_spec;
+  for (int i = 0; i < layers_.size(); ++i) {
+    vector<shared_ptr<Blob<Dtype> > >& layer_blobs = layers_[i]->blobs();
+    for (int j = 0; j < layer_blobs.size(); ++j) {
+      const ParamSpec* param_spec =
+          (layers_[i]->layer_param().param_size() > j) ?
+          &layers_[i]->layer_param().param(j) : &default_param_spec;
+      params_lr_.push_back(param_spec->lr_mult());
+      params_weight_decay_.push_back(param_spec->decay_mult());
+    }
+  }
+}
+
+template <typename Dtype>
+Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
+  CHECK_GE(start, 0);
+  CHECK_LT(end, layers_.size());
+  Dtype loss = 0;
+  if (debug_info_) {
+    for (int i = 0; i < net_input_blobs_.size(); ++i) {
+      InputDebugInfo(i);
+    }
+  }
+  for (int i = start; i <= end; ++i) {
+#ifdef XEON_PHI_DEBUG
+    LOG(ERROR) << "XEON: Forwarding " << layer_names_[i];
+#endif
+    layers_[i]->Reshape(bottom_vecs_[i], top_vecs_[i]);
+
+#ifdef LAYER_TIME
+    double min_cpu_time = 1e30;
+    double startTime = CycleTimer::currentSeconds();
+#endif
+
+    Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+
+#ifdef LAYER_TIME
+    double endTime = CycleTimer::currentSeconds();
+    if((endTime - startTime) < min_cpu_time)
+      min_cpu_time = endTime - startTime;
+
+    LOG(INFO)<<"\n Time taken for Forward in "<< layer_names_[i] <<
+               " is = " << min_cpu_time * 1000 <<"ms \n";
+#endif
+
+    loss += layer_loss;
+    if (debug_info_) { ForwardDebugInfo(i); }
+  }
+  return loss;
+}
+
+template <typename Dtype>
+Dtype Net<Dtype>::ForwardFrom(int start) {
+  return ForwardFromTo(start, layers_.size() - 1)

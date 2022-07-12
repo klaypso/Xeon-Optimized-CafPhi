@@ -612,4 +612,93 @@ template <typename Dtype>
 void Net<Dtype>::BackwardDebugInfo(const int layer_id) {
   const vector<Blob<Dtype>*>& bottom_vec = bottom_vecs_[layer_id];
   for (int bottom_id = 0; bottom_id < bottom_vec.size(); ++bottom_id) {
-    if 
+    if (!bottom_need_backward_[layer_id][bottom_id]) { continue; }
+    const Blob<Dtype>& blob = *bottom_vec[bottom_id];
+    const string& blob_name = blob_names_[bottom_id_vecs_[layer_id][bottom_id]];
+    const Dtype diff_abs_val_mean = blob.asum_diff() / blob.count();
+    LOG(INFO) << "    [Backward] "
+        << "Layer " << layer_names_[layer_id] << ", bottom blob " << blob_name
+        << " diff: " << diff_abs_val_mean;
+  }
+  for (int param_id = 0; param_id < layers_[layer_id]->blobs().size();
+       ++param_id) {
+    if (!layers_[layer_id]->param_propagate_down(param_id)) { continue; }
+    const Blob<Dtype>& blob = *layers_[layer_id]->blobs()[param_id];
+    const Dtype diff_abs_val_mean = blob.asum_diff() / blob.count();
+    LOG(INFO) << "    [Backward] "
+        << "Layer " << layer_names_[layer_id] << ", param blob " << param_id
+        << " diff: " << diff_abs_val_mean;
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::UpdateDebugInfo(const int param_id) {
+  const Blob<Dtype>& blob = *params_[param_id];
+  const int param_owner = param_owners_[param_id];
+  const string& layer_name = layer_names_[param_layer_indices_[param_id].first];
+  const string& param_display_name = param_display_names_[param_id];
+  const Dtype diff_abs_val_mean = blob.asum_diff() / blob.count();
+  if (param_owner < 0) {
+    const Dtype data_abs_val_mean = blob.asum_data() / blob.count();
+    LOG(INFO) << "    [Update] Layer " << layer_name
+        << ", param " << param_display_name
+        << " data: " << data_abs_val_mean << "; diff: " << diff_abs_val_mean;
+  } else {
+    const string& owner_layer_name =
+        layer_names_[param_layer_indices_[param_owner].first];
+    LOG(INFO) << "    [Update] Layer " << layer_name
+        << ", param blob " << param_display_name
+        << " (owned by layer " << owner_layer_name << ", "
+        << "param " << param_display_names_[param_owners_[param_id]] << ")"
+        << " diff: " << diff_abs_val_mean;
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::ShareTrainedLayersWith(const Net* other) {
+  int num_source_layers = other->layers().size();
+  for (int i = 0; i < num_source_layers; ++i) {
+    Layer<Dtype>* source_layer = other->layers()[i].get();
+    const string& source_layer_name = other->layer_names()[i];
+    int target_layer_id = 0;
+    while (target_layer_id != layer_names_.size() &&
+        layer_names_[target_layer_id] != source_layer_name) {
+      ++target_layer_id;
+    }
+    if (target_layer_id == layer_names_.size()) {
+      DLOG(INFO) << "Ignoring source layer " << source_layer_name;
+      continue;
+    }
+    DLOG(INFO) << "Copying source layer " << source_layer_name;
+    vector<shared_ptr<Blob<Dtype> > >& target_blobs =
+        layers_[target_layer_id]->blobs();
+    CHECK_EQ(target_blobs.size(), source_layer->blobs().size())
+        << "Incompatible number of blobs for layer " << source_layer_name;
+    for (int j = 0; j < target_blobs.size(); ++j) {
+      Blob<Dtype>* source_blob = source_layer->blobs()[j].get();
+      CHECK(target_blobs[j]->shape() == source_blob->shape());
+      target_blobs[j]->ShareData(*source_blob);
+    }
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::BackwardFrom(int start) {
+  BackwardFromTo(start, 0);
+}
+
+template <typename Dtype>
+void Net<Dtype>::BackwardTo(int end) {
+  BackwardFromTo(layers_.size() - 1, end);
+}
+
+template <typename Dtype>
+void Net<Dtype>::Backward() {
+  BackwardFromTo(layers_.size() - 1, 0);
+  if (debug_info_) {
+    Dtype asum_data = 0, asum_diff = 0, sumsq_data = 0, sumsq_diff = 0;
+    for (int i = 0; i < params_.size(); ++i) {
+      if (param_owners_[i] >= 0) { continue; }
+      asum_data += params_[i]->asum_data();
+      asum_diff += params_[i]->asum_diff();
+      sumsq_data += params_[i]->sumsq_da

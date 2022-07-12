@@ -701,4 +701,110 @@ void Net<Dtype>::Backward() {
       if (param_owners_[i] >= 0) { continue; }
       asum_data += params_[i]->asum_data();
       asum_diff += params_[i]->asum_diff();
-      sumsq_data += params_[i]->sumsq_da
+      sumsq_data += params_[i]->sumsq_data();
+      sumsq_diff += params_[i]->sumsq_diff();
+    }
+    const Dtype l2norm_data = std::sqrt(sumsq_data);
+    const Dtype l2norm_diff = std::sqrt(sumsq_diff);
+    LOG(ERROR) << "    [Backward] All net params (data, diff): "
+        << "L1 norm = (" << asum_data << ", " << asum_diff << "); "
+        << "L2 norm = (" << l2norm_data << ", " << l2norm_diff << ")";
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::Reshape() {
+  for (int i = 0; i < layers_.size(); ++i) {
+    layers_[i]->Reshape(bottom_vecs_[i], top_vecs_[i]);
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::CopyTrainedLayersFrom(const NetParameter& param) {
+  int num_source_layers = param.layer_size();
+  for (int i = 0; i < num_source_layers; ++i) {
+    const LayerParameter& source_layer = param.layer(i);
+    const string& source_layer_name = source_layer.name();
+    int target_layer_id = 0;
+    while (target_layer_id != layer_names_.size() &&
+        layer_names_[target_layer_id] != source_layer_name) {
+      ++target_layer_id;
+    }
+    if (target_layer_id == layer_names_.size()) {
+      DLOG(INFO) << "Ignoring source layer " << source_layer_name;
+      continue;
+    }
+    DLOG(INFO) << "Copying source layer " << source_layer_name;
+    vector<shared_ptr<Blob<Dtype> > >& target_blobs =
+        layers_[target_layer_id]->blobs();
+    CHECK_EQ(target_blobs.size(), source_layer.blobs_size())
+        << "Incompatible number of blobs for layer " << source_layer_name;
+    for (int j = 0; j < target_blobs.size(); ++j) {
+      const bool kReshape = false;
+      target_blobs[j]->FromProto(source_layer.blobs(j), kReshape);
+    }
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::CopyTrainedLayersFrom(const string trained_filename) {
+  NetParameter param;
+  ReadNetParamsFromBinaryFileOrDie(trained_filename, &param);
+  CopyTrainedLayersFrom(param);
+}
+
+template <typename Dtype>
+void Net<Dtype>::ToProto(NetParameter* param, bool write_diff) const {
+  param->Clear();
+  param->set_name(name_);
+  // Add bottom and top
+  for (int i = 0; i < net_input_blob_indices_.size(); ++i) {
+    param->add_input(blob_names_[net_input_blob_indices_[i]]);
+  }
+  DLOG(INFO) << "Serializing " << layers_.size() << " layers";
+  for (int i = 0; i < layers_.size(); ++i) {
+    LayerParameter* layer_param = param->add_layer();
+    for (int j = 0; j < bottom_id_vecs_[i].size(); ++j) {
+      layer_param->add_bottom(blob_names_[bottom_id_vecs_[i][j]]);
+    }
+    for (int j = 0; j < top_id_vecs_[i].size(); ++j) {
+      layer_param->add_top(blob_names_[top_id_vecs_[i][j]]);
+    }
+    layers_[i]->ToProto(layer_param, write_diff);
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::Update() {
+  // First, accumulate the diffs of any shared parameters into their owner's
+  // diff. (Assumes that the learning rate, weight decay, etc. have already been
+  // accounted for in the current diff.)
+  for (int i = 0; i < params_.size(); ++i) {
+    if (param_owners_[i] < 0) { continue; }
+    if (debug_info_) { UpdateDebugInfo(i); }
+    const int count = params_[i]->count();
+    const Dtype* this_diff;
+    Dtype* owner_diff;
+    switch (Caffe::mode()) {
+    case Caffe::CPU:
+      this_diff = params_[i]->cpu_diff();
+      owner_diff = params_[param_owners_[i]]->mutable_cpu_diff();
+      caffe_add(count, this_diff, owner_diff, owner_diff);
+      break;
+#ifndef CPU_ONLY
+    case Caffe::GPU:
+      this_diff = params_[i]->gpu_diff();
+      owner_diff = params_[param_owners_[i]]->mutable_gpu_diff();
+      caffe_gpu_add(count, this_diff, owner_diff, owner_diff);
+      break;
+#else
+      NO_GPU;
+#endif
+    default:
+      LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+    }
+  }
+  // Now, update the owned parameters.
+  for (int i = 0; i < params_.size(); ++i) {
+    if (param_owners_[i] >= 0) { continue; }
+    if (debug_info_) { UpdateDebugInfo(i); }

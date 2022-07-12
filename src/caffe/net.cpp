@@ -499,4 +499,117 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
 
 template <typename Dtype>
 Dtype Net<Dtype>::ForwardFrom(int start) {
-  return ForwardFromTo(start, layers_.size() - 1)
+  return ForwardFromTo(start, layers_.size() - 1);
+}
+
+template <typename Dtype>
+Dtype Net<Dtype>::ForwardTo(int end) {
+  return ForwardFromTo(0, end);
+}
+
+template <typename Dtype>
+const vector<Blob<Dtype>*>& Net<Dtype>::ForwardPrefilled(Dtype* loss) {
+  if (loss != NULL) {
+    *loss = ForwardFromTo(0, layers_.size() - 1);
+  } else {
+    ForwardFromTo(0, layers_.size() - 1);
+  }
+  return net_output_blobs_;
+}
+
+template <typename Dtype>
+const vector<Blob<Dtype>*>& Net<Dtype>::Forward(
+    const vector<Blob<Dtype>*> & bottom, Dtype* loss) {
+  // Copy bottom to internal bottom
+  for (int i = 0; i < bottom.size(); ++i) {
+    net_input_blobs_[i]->CopyFrom(*bottom[i]);
+  }
+  return ForwardPrefilled(loss);
+}
+
+template <typename Dtype>
+string Net<Dtype>::Forward(const string& input_blob_protos, Dtype* loss) {
+  BlobProtoVector blob_proto_vec;
+  if (net_input_blobs_.size()) {
+    blob_proto_vec.ParseFromString(input_blob_protos);
+    CHECK_EQ(blob_proto_vec.blobs_size(), net_input_blobs_.size())
+        << "Incorrect input size.";
+    for (int i = 0; i < blob_proto_vec.blobs_size(); ++i) {
+      net_input_blobs_[i]->FromProto(blob_proto_vec.blobs(i));
+    }
+  }
+  ForwardPrefilled(loss);
+  blob_proto_vec.Clear();
+  for (int i = 0; i < net_output_blobs_.size(); ++i) {
+    net_output_blobs_[i]->ToProto(blob_proto_vec.add_blobs());
+  }
+  string output;
+  blob_proto_vec.SerializeToString(&output);
+  return output;
+}
+
+template <typename Dtype>
+void Net<Dtype>::BackwardFromTo(int start, int end) {
+  CHECK_GE(end, 0);
+  CHECK_LT(start, layers_.size());
+  for (int i = start; i >= end; --i) {
+    if (layer_need_backward_[i]) {
+
+#ifdef LAYER_TIME    
+      double min_cpu_time = 1e30;
+      double startTime = CycleTimer::currentSeconds();
+#endif
+
+      layers_[i]->Backward(
+          top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+
+#ifdef LAYER_TIME
+      double endTime = CycleTimer::currentSeconds();
+      if((endTime - startTime) < min_cpu_time)
+        min_cpu_time = endTime - startTime;
+
+      LOG(INFO)<<"\n Time taken for Backward in "<< layer_names_[i] <<
+                 " is = " << min_cpu_time * 1000 <<"ms \n";
+#endif
+    
+      if (debug_info_) { BackwardDebugInfo(i); }
+    }
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::InputDebugInfo(const int input_id) {
+  const Blob<Dtype>& blob = *net_input_blobs_[input_id];
+  const string& blob_name = blob_names_[net_input_blob_indices_[input_id]];
+  const Dtype data_abs_val_mean = blob.asum_data() / blob.count();
+  LOG(INFO) << "    [Forward] "
+     << "Input " << blob_name << " data: " << data_abs_val_mean;
+}
+
+template <typename Dtype>
+void Net<Dtype>::ForwardDebugInfo(const int layer_id) {
+  for (int top_id = 0; top_id < top_vecs_[layer_id].size(); ++top_id) {
+    const Blob<Dtype>& blob = *top_vecs_[layer_id][top_id];
+    const string& blob_name = blob_names_[top_id_vecs_[layer_id][top_id]];
+    const Dtype data_abs_val_mean = blob.asum_data() / blob.count();
+    LOG(INFO) << "    [Forward] "
+       << "Layer " << layer_names_[layer_id] << ", top blob " << blob_name
+       << " data: " << data_abs_val_mean;
+  }
+  for (int param_id = 0; param_id < layers_[layer_id]->blobs().size();
+       ++param_id) {
+    const Blob<Dtype>& blob = *layers_[layer_id]->blobs()[param_id];
+    const int net_param_id = param_id_vecs_[layer_id][param_id];
+    const string& blob_name = param_display_names_[net_param_id];
+    const Dtype data_abs_val_mean = blob.asum_data() / blob.count();
+    LOG(INFO) << "    [Forward] "
+       << "Layer " << layer_names_[layer_id] << ", param blob " << blob_name
+       << " data: " << data_abs_val_mean;
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::BackwardDebugInfo(const int layer_id) {
+  const vector<Blob<Dtype>*>& bottom_vec = bottom_vecs_[layer_id];
+  for (int bottom_id = 0; bottom_id < bottom_vec.size(); ++bottom_id) {
+    if 

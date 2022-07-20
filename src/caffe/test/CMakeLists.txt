@@ -22,4 +22,15 @@ if(HAVE_CUDA)
   caffe_cuda_compile(test_cuda_objs ${test_cuda})
   list(APPEND test_srcs ${test_cuda_objs} ${test_cuda})
 else()
-  l
+  list(APPEND test_args --gtest_filter="-*GPU*")
+endif()
+
+# ---[ Adding test target
+add_executable(${the_target} EXCLUDE_FROM_ALL ${test_srcs})
+target_link_libraries(${the_target} gtest ${Caffe_LINK})
+caffe_default_properties(${the_target})
+caffe_set_runtime_directory(${the_target} "${PROJECT_BINARY_DIR}/test")
+
+# ---[ Adding runtest
+add_custom_target(runtest COMMAND ${the_target} ${test_args}
+                          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

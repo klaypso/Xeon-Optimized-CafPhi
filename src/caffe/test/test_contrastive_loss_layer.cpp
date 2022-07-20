@@ -83,4 +83,20 @@ TYPED_TEST(ContrastiveLossLayerTest, TestForward) {
     }
   }
   loss /= static_cast<Dtype>(num) * Dtype(2);
-  EXPECT_NEAR(this->
+  EXPECT_NEAR(this->blob_top_loss_->cpu_data()[0], loss, 1e-6);
+}
+
+TYPED_TEST(ContrastiveLossLayerTest, TestGradient) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  ContrastiveLossLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  GradientChecker<Dtype> checker(1e-2, 1e-2, 1701);
+  // check the gradient for the first two bottom layers
+  checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+      this->blob_top_vec_, 0);
+  checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+      this->blob_top_vec_, 1);
+}
+
+}  // namespace caffe

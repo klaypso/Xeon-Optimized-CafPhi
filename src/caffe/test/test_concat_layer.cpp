@@ -144,4 +144,33 @@ TYPED_TEST(ConcatLayerTest, TestForwardChannels) {
       }
     }
     for (int c = 0; c < this->blob_bottom_1_->channels(); ++c) {
-      for (int h = 0; h < this->blob_top_->heig
+      for (int h = 0; h < this->blob_top_->height(); ++h) {
+        for (int w = 0; w < this->blob_top_->width(); ++w) {
+          EXPECT_EQ(this->blob_top_->data_at(n, c + 3, h, w),
+              this->blob_bottom_vec_0_[1]->data_at(n, c, h, w));
+        }
+      }
+    }
+  }
+}
+
+TYPED_TEST(ConcatLayerTest, TestGradientNum) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  layer_param.mutable_concat_param()->set_axis(0);
+  ConcatLayer<Dtype> layer(layer_param);
+  GradientChecker<Dtype> checker(1e-2, 1e-2);
+  checker.CheckGradient(&layer, this->blob_bottom_vec_1_,
+    this->blob_top_vec_);
+}
+
+TYPED_TEST(ConcatLayerTest, TestGradientChannels) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  ConcatLayer<Dtype> layer(layer_param);
+  GradientChecker<Dtype> checker(1e-2, 1e-2);
+  checker.CheckGradient(&layer, this->blob_bottom_vec_0_,
+    this->blob_top_vec_);
+}
+
+}  // namespace caffe

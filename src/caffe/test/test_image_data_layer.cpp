@@ -155,4 +155,25 @@ TYPED_TEST(ImageDataLayerTest, TestShuffle) {
   EXPECT_EQ(this->blob_top_data_->channels(), 3);
   EXPECT_EQ(this->blob_top_data_->height(), 360);
   EXPECT_EQ(this->blob_top_data_->width(), 480);
-  EXPE
+  EXPECT_EQ(this->blob_top_label_->num(), 5);
+  EXPECT_EQ(this->blob_top_label_->channels(), 1);
+  EXPECT_EQ(this->blob_top_label_->height(), 1);
+  EXPECT_EQ(this->blob_top_label_->width(), 1);
+  // Go through the data twice
+  for (int iter = 0; iter < 2; ++iter) {
+    layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+    map<Dtype, int> values_to_indices;
+    int num_in_order = 0;
+    for (int i = 0; i < 5; ++i) {
+      Dtype value = this->blob_top_label_->cpu_data()[i];
+      // Check that the value has not been seen already (no duplicates).
+      EXPECT_EQ(values_to_indices.find(value), values_to_indices.end());
+      values_to_indices[value] = i;
+      num_in_order += (value == Dtype(i));
+    }
+    EXPECT_EQ(5, values_to_indices.size());
+    EXPECT_GT(5, num_in_order);
+  }
+}
+
+}  // namespace caffe

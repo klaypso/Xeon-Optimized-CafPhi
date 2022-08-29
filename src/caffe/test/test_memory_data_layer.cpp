@@ -247,4 +247,50 @@ TYPED_TEST(MemoryDataLayerTest, TestSetBatchSize) {
         int index = 0;
         for (int w = 0; w < this->width_; ++w) {
           for (int c = 0; c < this->channels_; ++c) {
-            data_index = (i*count) + (c * this->height_ + h) * this->width_ + 
+            data_index = (i*count) + (c * this->height_ + h) * this->width_ + w;
+            Dtype pixel = static_cast<Dtype>(ptr_mat[index++]);
+            EXPECT_EQ(static_cast<int>(pixel), data[data_index]);
+          }
+        }
+      }
+    }
+  }
+  // and then add new data with different batch_size
+  int new_batch_size = 16;
+  layer.set_batch_size(new_batch_size);
+  mat_vector.clear();
+  mat_vector.resize(new_batch_size * num_iter);
+  label_vector.clear();
+  label_vector.resize(new_batch_size * num_iter);
+  for (int i = 0; i < new_batch_size*num_iter; ++i) {
+    mat_vector[i] = cv::Mat(this->height_, this->width_, CV_8UC4);
+    label_vector[i] = i;
+    cv::randu(mat_vector[i], cv::Scalar::all(0), cv::Scalar::all(255));
+  }
+  layer.AddMatVector(mat_vector, label_vector);
+
+  // finally consume new data and check if everything is fine
+  for (int iter = 0; iter < num_iter; ++iter) {
+    int offset = new_batch_size * iter;
+    layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+    EXPECT_EQ(new_batch_size, this->blob_top_vec_[0]->num());
+    EXPECT_EQ(new_batch_size, this->blob_top_vec_[1]->num());
+    const Dtype* data = this->data_blob_->cpu_data();
+    for (int i = 0; i < new_batch_size; ++i) {
+      EXPECT_EQ(offset + i, this->label_blob_->cpu_data()[i]);
+      for (int h = 0; h < this->height_; ++h) {
+        const unsigned char* ptr_mat = mat_vector[offset + i].ptr<uchar>(h);
+        int index = 0;
+        for (int w = 0; w < this->width_; ++w) {
+          for (int c = 0; c < this->channels_; ++c) {
+            data_index = (i*count) + (c * this->height_ + h) * this->width_ + w;
+            Dtype pixel = static_cast<Dtype>(ptr_mat[index++]);
+            EXPECT_EQ(static_cast<int>(pixel), data[data_index]);
+          }
+        }
+      }
+    }
+  }
+}
+
+}  // namespace caffe

@@ -59,4 +59,150 @@ class NetTest : public MultiDeviceTest<TypeParam> {
                            const bool accuracy_layer = false) {
     string proto =
         "name: 'TinyTestNetwork' "
-      
+        "layer { "
+        "  name: 'data' "
+        "  type: 'DummyData' "
+        "  dummy_data_param { "
+        "    shape { "
+        "      dim: 5 "
+        "      dim: 2 "
+        "      dim: 3 "
+        "      dim: 4 "
+        "    } "
+        "    data_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "    shape { "
+        "      dim: 5 "
+        "    } "
+        "    data_filler { "
+        "      type: 'constant' "
+        "      value: 0 "
+        "    } "
+        "  } "
+        "  top: 'data' "
+        "  top: 'label' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 1000 "
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "    bias_filler { "
+        "      type: 'constant' "
+        "      value: 0 "
+        "    } "
+        "  } "
+        "  param { "
+        "    lr_mult: 1 "
+        "    decay_mult: 1 "
+        "  } "
+        "  param { "
+        "    lr_mult: 2 "
+        "    decay_mult: 0 "
+        "  } "
+        "  bottom: 'data' "
+        "  top: 'innerproduct' "
+        "} "
+        "layer { "
+        "  name: 'loss' "
+        "  type: 'SoftmaxWithLoss' "
+        "  bottom: 'innerproduct' "
+        "  bottom: 'label' "
+        "  top: 'top_loss' "
+        "} ";
+    if (accuracy_layer) {
+      proto +=
+          "layer { "
+          "  name: 'loss' "
+          "  type: 'Accuracy' "
+          "  bottom: 'innerproduct' "
+          "  bottom: 'label' "
+          "  top: 'accuracy' "
+          "} ";
+    }
+    if (force_backward) {
+      proto += "force_backward: true ";
+    }
+    InitNetFromProtoString(proto);
+  }
+
+  virtual void InitTinyNetEuclidean(const bool force_backward = false) {
+    string proto =
+        "name: 'TinyTestEuclidLossNetwork' "
+        "layer { "
+        "  name: 'data' "
+        "  type: 'DummyData' "
+        "  dummy_data_param { "
+        "    num: 5 "
+        "    channels: 2 "
+        "    height: 3 "
+        "    width: 4 "
+        "    num: 5 "
+        "    channels: 1 "
+        "    height: 1 "
+        "    width: 1 "
+        "    data_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "  } "
+        "  top: 'data' "
+        "  top: 'label' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 1 "
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "    bias_filler { "
+        "      type: 'constant' "
+        "      value: 0 "
+        "    } "
+        "  } "
+        "  param { "
+        "    lr_mult: 1 "
+        "    decay_mult: 1 "
+        "  } "
+        "  param { "
+        "    lr_mult: 2 "
+        "    decay_mult: 0 "
+        "  } "
+        "  bottom: 'data' "
+        "  top: 'innerproduct' "
+        "} "
+        "layer { "
+        "  name: 'loss' "
+        "  type: 'EuclideanLoss' "
+        "  bottom: 'innerproduct' "
+        "  bottom: 'label' "
+        "} ";
+    if (force_backward) {
+      proto += "force_backward: true ";
+    }
+    InitNetFromProtoString(proto);
+  }
+
+  virtual void InitTrickyNet(Dtype* loss_weight = NULL) {
+    ostringstream loss_weight_stream;
+    if (loss_weight) {
+      loss_weight_stream << "  loss_weight: " << *loss_weight << " ";
+    }
+    const string& proto =
+        "name: 'TrickyTestNetwork' "
+        "layer { "
+        "  name: 'data' "
+        "  type: 'DummyData' "
+        "  dummy_data_param { "
+        "    num: 5 "
+        "    channels: 2 "
+        "    height:

@@ -205,4 +205,130 @@ class NetTest : public MultiDeviceTest<TypeParam> {
         "  dummy_data_param { "
         "    num: 5 "
         "    channels: 2 "
-        "    height:
+        "    height: 3 "
+        "    width: 4 "
+        "    num: 5 "
+        "    channels: 1 "
+        "    height: 1 "
+        "    width: 1 "
+        "    data_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "  } "
+        "  top: 'data' "
+        "  top: 'label' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 1000 "
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "    bias_filler { "
+        "      type: 'constant' "
+        "      value: 0 "
+        "    } "
+        "  } "
+        "  param { "
+        "    lr_mult: 1 "
+        "    decay_mult: 1 "
+        "  } "
+        "  param { "
+        "    lr_mult: 2 "
+        "    decay_mult: 0 "
+        "  } "
+        "  bottom: 'data' "
+        "  top: 'transformed_data' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 1 "
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "    bias_filler { "
+        "      type: 'constant' "
+        "      value: 0 "
+        "    } "
+        "  } "
+        "  param { "
+        "    lr_mult: 1 "
+        "    decay_mult: 1 "
+        "  } "
+        "  param { "
+        "    lr_mult: 2 "
+        "    decay_mult: 0 "
+        "  } "
+        "  bottom: 'label' "
+        "  top: 'transformed_label' "
+        "} "
+        "layer { "
+        "  name: 'loss' "
+        "  type: 'SoftmaxWithLoss' " +
+        loss_weight_stream.str() +
+        "  bottom: 'transformed_data' "
+        "  bottom: 'transformed_label' "
+        "} ";
+    InitNetFromProtoString(proto);
+  }
+
+  // loss_weight is the loss weight for the 'EuclideanLoss' layer output.
+  // midnet_loss_weight is the loss weight for the first 'InnerProduct' layer
+  // output.  Should both default to 0.0 if unspecified (i.e., if NULL is
+  // passed to this function).
+  virtual void InitUnsharedWeightsNet(const Dtype* loss_weight = NULL,
+      const Dtype* midnet_loss_weight = NULL,
+      const bool force_backward = false, const bool bias_term = false,
+      const Dtype blobs_lr_w1 = 1, const Dtype blobs_lr_b1 = 2,
+      const Dtype blobs_lr_w2 = 1, const Dtype blobs_lr_b2 = 2) {
+    ostringstream proto;
+    proto << "name: 'UnsharedWeightsNetwork' ";
+    if (force_backward) {
+      proto << "force_backward: true ";
+    }
+    proto <<
+        "layer { "
+        "  name: 'data' "
+        "  type: 'DummyData' "
+        "  dummy_data_param { "
+        "    num: 5 "
+        "    channels: 2 "
+        "    height: 3 "
+        "    width: 4 "
+        "    data_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "  } "
+        "  top: 'data' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct1' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 10 "
+        "    bias_term: " << bias_term <<
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 10 "
+        "    } "
+        "  } "
+        "  param { "
+        "    name: 'unsharedweights1' "
+        "    lr_mult: " << blobs_lr_w1 <<
+        "  } ";
+    if (bias_term) {
+      proto << "  param { lr_mult: " << blobs_lr_b1 << " } ";
+    }
+    proto <<
+        "  bottom: 'data' "
+        "  top: 'innerproduct1' ";
+    if (midnet_loss_weight) {
+      proto << "  loss_weight: "

@@ -331,4 +331,144 @@ class NetTest : public MultiDeviceTest<TypeParam> {
         "  bottom: 'data' "
         "  top: 'innerproduct1' ";
     if (midnet_loss_weight) {
-      proto << "  loss_weight: "
+      proto << "  loss_weight: " << *midnet_loss_weight << " ";
+    }
+    proto <<
+        "} "
+        "layer { "
+        "  name: 'innerproduct2' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 10 "
+        "    bias_term: " << bias_term <<
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 10 "
+        "    } "
+        "  } "
+        "  param { "
+        "    name: 'unsharedweights2' "
+        "    lr_mult: " << blobs_lr_w2 <<
+        "  } ";
+    if (bias_term) {
+      proto << "  param { lr_mult: " << blobs_lr_b2 << " } ";
+    }
+    proto <<
+        "  bottom: 'data' "
+        "  top: 'innerproduct2' "
+        "} "
+        "layer { "
+        "  name: 'loss' "
+        "  type: 'EuclideanLoss' ";
+    if (loss_weight) {
+      proto << "  loss_weight: " << *loss_weight << " ";
+    }
+    proto <<
+        "  bottom: 'innerproduct1' "
+        "  bottom: 'innerproduct2' "
+        "} ";
+    InitNetFromProtoString(proto.str());
+  }
+
+  virtual void InitSharedWeightsNet() {
+    const string& proto =
+        "name: 'SharedWeightsNetwork' "
+        "layer { "
+        "  name: 'data' "
+        "  type: 'DummyData' "
+        "  dummy_data_param { "
+        "    num: 5 "
+        "    channels: 2 "
+        "    height: 3 "
+        "    width: 4 "
+        "    data_filler { "
+        "      type: 'gaussian' "
+        "      std: 0.01 "
+        "    } "
+        "  } "
+        "  top: 'data' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct1' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 10 "
+        "    bias_term: false "
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 10 "
+        "    } "
+        "  } "
+        "  param { name: 'sharedweights' } "
+        "  bottom: 'data' "
+        "  top: 'innerproduct1' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct2' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 10 "
+        "    bias_term: false "
+        "    weight_filler { "
+        "      type: 'gaussian' "
+        "      std: 10 "
+        "    } "
+        "  } "
+        "  param { name: 'sharedweights' } "
+        "  bottom: 'data' "
+        "  top: 'innerproduct2' "
+        "} "
+        "layer { "
+        "  name: 'loss' "
+        "  type: 'EuclideanLoss' "
+        "  bottom: 'innerproduct1' "
+        "  bottom: 'innerproduct2' "
+        "} ";
+    InitNetFromProtoString(proto);
+  }
+
+  virtual void InitDiffDataUnsharedWeightsNet() {
+    const string& proto =
+        "name: 'DiffDataUnsharedWeightsNetwork' "
+        "layer { "
+        "  name: 'data' "
+        "  type: 'DummyData' "
+        "  dummy_data_param { "
+        "    num: 10 "
+        "    channels: 10 "
+        "    height: 1 "
+        "    width: 1 "
+        "    num: 10 "
+        "    channels: 10 "
+        "    height: 1 "
+        "    width: 1 "
+        "    data_filler { "
+        "      type: 'gaussian' "
+        "      std: 10 "
+        "    } "
+        "  } "
+        "  top: 'data1' "
+        "  top: 'data2' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct1' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 10 "
+        "    bias_term: false "
+        "    weight_filler { "
+        "      type: 'constant' "
+        "      value: 0.5 "
+        "    } "
+        "  } "
+        "  param { name: 'unsharedweights1' } "
+        "  bottom: 'data1' "
+        "  top: 'innerproduct1' "
+        "} "
+        "layer { "
+        "  name: 'innerproduct2' "
+        "  type: 'InnerProduct' "
+        "  inner_product_param { "
+        "    num_output: 10 "
+        "    bias_term: false "
+        "    weight_f

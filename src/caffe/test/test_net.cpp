@@ -621,4 +621,97 @@ TYPED_TEST_CASE(NetTest, TestDtypesAndDevices);
 
 TYPED_TEST(NetTest, TestHasBlob) {
   this->InitTinyNet();
-  EXPECT_TRUE(t
+  EXPECT_TRUE(this->net_->has_blob("data"));
+  EXPECT_TRUE(this->net_->has_blob("label"));
+  EXPECT_TRUE(this->net_->has_blob("innerproduct"));
+  EXPECT_FALSE(this->net_->has_blob("loss"));
+  EXPECT_TRUE(this->net_->has_blob("top_loss"));
+}
+
+TYPED_TEST(NetTest, TestGetBlob) {
+  this->InitTinyNet();
+  EXPECT_EQ(this->net_->blob_by_name("data"), this->net_->blobs()[0]);
+  EXPECT_EQ(this->net_->blob_by_name("label"), this->net_->blobs()[1]);
+  EXPECT_EQ(this->net_->blob_by_name("innerproduct"), this->net_->blobs()[2]);
+  EXPECT_FALSE(this->net_->blob_by_name("loss"));
+  EXPECT_EQ(this->net_->blob_by_name("top_loss"), this->net_->blobs()[3]);
+}
+
+TYPED_TEST(NetTest, TestHasLayer) {
+  this->InitTinyNet();
+  EXPECT_TRUE(this->net_->has_layer("data"));
+  EXPECT_TRUE(this->net_->has_layer("innerproduct"));
+  EXPECT_TRUE(this->net_->has_layer("loss"));
+  EXPECT_FALSE(this->net_->has_layer("label"));
+}
+
+TYPED_TEST(NetTest, TestGetLayerByName) {
+  this->InitTinyNet();
+  EXPECT_EQ(this->net_->layer_by_name("data"), this->net_->layers()[0]);
+  EXPECT_EQ(this->net_->layer_by_name("innerproduct"), this->net_->layers()[1]);
+  EXPECT_EQ(this->net_->layer_by_name("loss"), this->net_->layers()[2]);
+  EXPECT_FALSE(this->net_->layer_by_name("label"));
+}
+
+TYPED_TEST(NetTest, TestBottomNeedBackward) {
+  this->InitTinyNet();
+  const vector<vector<bool> >& bottom_need_backward =
+      this->net_->bottom_need_backward();
+  EXPECT_EQ(3, bottom_need_backward.size());
+  EXPECT_EQ(0, bottom_need_backward[0].size());
+  EXPECT_EQ(1, bottom_need_backward[1].size());
+  EXPECT_EQ(false, bottom_need_backward[1][0]);
+  EXPECT_EQ(2, bottom_need_backward[2].size());
+  EXPECT_EQ(true, bottom_need_backward[2][0]);
+  EXPECT_EQ(false, bottom_need_backward[2][1]);
+}
+
+TYPED_TEST(NetTest, TestBottomNeedBackwardForce) {
+  const bool force_backward = true;
+  this->InitTinyNet(force_backward);
+  const vector<vector<bool> >& bottom_need_backward =
+      this->net_->bottom_need_backward();
+  EXPECT_EQ(3, bottom_need_backward.size());
+  EXPECT_EQ(0, bottom_need_backward[0].size());
+  EXPECT_EQ(1, bottom_need_backward[1].size());
+  EXPECT_EQ(true, bottom_need_backward[1][0]);
+  EXPECT_EQ(2, bottom_need_backward[2].size());
+  EXPECT_EQ(true, bottom_need_backward[2][0]);
+  EXPECT_EQ(false, bottom_need_backward[2][1]);
+}
+
+TYPED_TEST(NetTest, TestBottomNeedBackwardEuclideanForce) {
+  const bool force_backward = true;
+  this->InitTinyNetEuclidean(force_backward);
+  const vector<vector<bool> >& bottom_need_backward =
+      this->net_->bottom_need_backward();
+  EXPECT_EQ(3, bottom_need_backward.size());
+  EXPECT_EQ(0, bottom_need_backward[0].size());
+  EXPECT_EQ(1, bottom_need_backward[1].size());
+  EXPECT_EQ(true, bottom_need_backward[1][0]);
+  EXPECT_EQ(2, bottom_need_backward[2].size());
+  EXPECT_EQ(true, bottom_need_backward[2][0]);
+  EXPECT_EQ(true, bottom_need_backward[2][1]);
+}
+
+TYPED_TEST(NetTest, TestBottomNeedBackwardTricky) {
+  this->InitTrickyNet();
+  const vector<vector<bool> >& bottom_need_backward =
+      this->net_->bottom_need_backward();
+  EXPECT_EQ(4, bottom_need_backward.size());
+  EXPECT_EQ(0, bottom_need_backward[0].size());
+  EXPECT_EQ(1, bottom_need_backward[1].size());
+  EXPECT_EQ(false, bottom_need_backward[1][0]);
+  EXPECT_EQ(1, bottom_need_backward[2].size());
+  EXPECT_EQ(false, bottom_need_backward[2][0]);
+  EXPECT_EQ(2, bottom_need_backward[3].size());
+  EXPECT_EQ(true, bottom_need_backward[3][0]);
+  // The label input to the SoftmaxLossLayer should say it "needs backward"
+  // since it has weights under it, even though we expect this to cause a crash
+  // at training/test time.
+  EXPECT_EQ(true, bottom_need_backward[3][1]);
+}
+
+TYPED_TEST(NetTest, TestLossWeight) {
+  typedef typename TypeParam::Dtype Dtype;
+  // First, compute the loss and gradients with no 

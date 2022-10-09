@@ -714,4 +714,85 @@ TYPED_TEST(NetTest, TestBottomNeedBackwardTricky) {
 
 TYPED_TEST(NetTest, TestLossWeight) {
   typedef typename TypeParam::Dtype Dtype;
-  // First, compute the loss and gradients with no 
+  // First, compute the loss and gradients with no loss_weight specified.
+  // In this case, the loss weight for the 'EuclideanLoss' layer should default
+  // to 1.
+  vector<Blob<Dtype>*> bottom;
+  Caffe::set_random_seed(this->seed_);
+  const bool kForceBackward = true;
+  this->InitUnsharedWeightsNet(NULL, NULL, kForceBackward);
+  const Dtype loss = this->net_->ForwardBackward(bottom);
+  const bool kCopyDiff = true;
+  vector<shared_ptr<Blob<Dtype> > > blob_grads;
+  this->CopyNetBlobs(kCopyDiff, &blob_grads);
+  vector<shared_ptr<Blob<Dtype> > > param_grads;
+  this->CopyNetParams(kCopyDiff, &param_grads);
+  // Check that the loss is non-trivial, otherwise the test doesn't prove much.
+  const Dtype kMinLossAbsValue = 1e-2;
+  ASSERT_GE(fabs(loss), kMinLossAbsValue);
+  const Dtype kErrorMargin = 1e-4;
+  const int kNumLossWeights = 6;
+  Dtype kLossWeights[kNumLossWeights] = {2, 0, 1, -1, -2.5, 3.7};
+  for (int i = 0; i < kNumLossWeights; ++i) {
+    Caffe::set_random_seed(this->seed_);
+    this->InitUnsharedWeightsNet(&kLossWeights[i], NULL, kForceBackward);
+    const Dtype weighted_loss = this->net_->ForwardBackward(bottom);
+    const Dtype error_margin = kErrorMargin * fabs(kLossWeights[i]);
+    EXPECT_NEAR(loss * kLossWeights[i], weighted_loss, error_margin)
+        << "loss weight = " << kLossWeights[i];
+    const vector<shared_ptr<Blob<Dtype> > >& weighted_blobs =
+        this->net_->blobs();
+    ASSERT_EQ(blob_grads.size(), weighted_blobs.size());
+    for (int j = 0; j < blob_grads.size(); ++j) {
+      ASSERT_EQ(blob_grads[j]->count(), weighted_blobs[j]->count());
+      for (int k = 0; k < blob_grads[j]->count(); ++k) {
+        EXPECT_NEAR(blob_grads[j]->cpu_diff()[k] * kLossWeights[i],
+                    weighted_blobs[j]->cpu_diff()[k], error_margin);
+      }
+    }
+    const vector<shared_ptr<Blob<Dtype> > >& weighted_params =
+        this->net_->params();
+    ASSERT_EQ(param_grads.size(), weighted_params.size());
+    for (int j = 0; j < param_grads.size(); ++j) {
+      ASSERT_EQ(param_grads[j]->count(), weighted_params[j]->count());
+      for (int k = 0; k < param_grads[j]->count(); ++k) {
+        EXPECT_NEAR(param_grads[j]->cpu_diff()[k] * kLossWeights[i],
+                    weighted_params[j]->cpu_diff()[k], error_margin);
+      }
+    }
+  }
+}
+
+TYPED_TEST(NetTest, TestLossWeightMidNet) {
+  typedef typename TypeParam::Dtype Dtype;
+  vector<Blob<Dtype>*> bottom;
+  Caffe::set_random_seed(this->seed_);
+  const bool kForceBackward = true;
+  Dtype loss_weight = 0;
+  Dtype midnet_loss_weight = 1;
+  this->InitUnsharedWeightsNet(&loss_weight, &midnet_loss_weight,
+                               kForceBackward);
+  const Dtype loss = this->net_->ForwardBackward(bottom);
+  const bool kCopyDiff = true;
+  const bool kReshape = true;
+  Blob<Dtype> data_grad;
+  data_grad.CopyFrom(*this->net_->blob_by_name("data"), kCopyDiff, kReshape);
+  // Check that the loss is non-trivial, otherwise the test doesn't prove much.
+  const Dtype kMinLossAbsValue = 1e-2;
+  ASSERT_GE(fabs(loss), kMinLossAbsValue);
+  const Dtype kErrorMargin = 1e-4;
+  const int kNumLossWeights = 6;
+  Dtype kLossWeights[kNumLossWeights] = {2, 0, 1, -1, -2.5, 3.7};
+  for (int i = 0; i < kNumLossWeights; ++i) {
+    Caffe::set_random_seed(this->seed_);
+    this->InitUnsharedWeightsNet(&loss_weight, &kLossWeights[i],
+                                 kForceBackward);
+    const Dtype weighted_loss = this->net_->ForwardBackward(bottom);
+    const Dtype error_margin = kErrorMargin * fabs(kLossWeights[i]);
+    EXPECT_NEAR(loss * kLossWeights[i], weighted_loss, error_margin)
+        << "loss weight = " << kLossWeights[i];
+    const shared_ptr<Blob<Dtype> >& weighted_blob =
+        this->net_->blob_by_name("data");
+    ASSERT_EQ(data_grad.count(), weighted_blob->count());
+    for (int j = 0; j < data_grad.count(); ++j) {
+      EXPECT_NEAR(data_grad.c

@@ -795,4 +795,96 @@ TYPED_TEST(NetTest, TestLossWeightMidNet) {
         this->net_->blob_by_name("data");
     ASSERT_EQ(data_grad.count(), weighted_blob->count());
     for (int j = 0; j < data_grad.count(); ++j) {
-      EXPECT_NEAR(data_grad.c
+      EXPECT_NEAR(data_grad.cpu_diff()[j] * kLossWeights[i],
+                  weighted_blob->cpu_diff()[j], error_margin);
+    }
+  }
+}
+
+TYPED_TEST(NetTest, TestComboLossWeight) {
+  typedef typename TypeParam::Dtype Dtype;
+  vector<Blob<Dtype>*> bottom;
+  Dtype loss_weight;
+  Dtype midnet_loss_weight;
+  const bool kForceBackward = true;
+  const Dtype kErrorMargin = 1e-4;
+
+  // Get the loss and gradients with 'EuclideanLoss' weight 1,
+  // 'InnerProduct' weight 1.
+  loss_weight = 1;
+  midnet_loss_weight = 1;
+  Caffe::set_random_seed(this->seed_);
+  this->InitUnsharedWeightsNet(&loss_weight, &midnet_loss_weight,
+                               kForceBackward);
+  const Dtype loss = this->net_->ForwardBackward(bottom);
+  const bool kCopyDiff = true;
+  vector<shared_ptr<Blob<Dtype> > > blob_grads;
+  this->CopyNetBlobs(kCopyDiff, &blob_grads);
+  vector<shared_ptr<Blob<Dtype> > > param_grads;
+  this->CopyNetParams(kCopyDiff, &param_grads);
+
+  loss_weight = 2;
+  midnet_loss_weight = 1;
+  Caffe::set_random_seed(this->seed_);
+  this->InitUnsharedWeightsNet(&loss_weight, &midnet_loss_weight,
+                               kForceBackward);
+  const Dtype loss_main_2 = this->net_->ForwardBackward(bottom);
+  vector<shared_ptr<Blob<Dtype> > > blob_grads_loss_2;
+  this->CopyNetBlobs(kCopyDiff, &blob_grads_loss_2);
+  vector<shared_ptr<Blob<Dtype> > > param_grads_loss_2;
+  this->CopyNetParams(kCopyDiff, &param_grads_loss_2);
+
+  loss_weight = 3;
+  midnet_loss_weight = 1;
+  Caffe::set_random_seed(this->seed_);
+  this->InitUnsharedWeightsNet(&loss_weight, &midnet_loss_weight,
+                               kForceBackward);
+  const Dtype loss_main_3 = this->net_->ForwardBackward(bottom);
+  const vector<shared_ptr<Blob<Dtype> > >& blob_grads_loss_3 =
+      this->net_->blobs();
+  ASSERT_EQ(blob_grads.size(), blob_grads_loss_3.size());
+  ASSERT_EQ(blob_grads_loss_2.size(), blob_grads_loss_3.size());
+  for (int j = 0; j < blob_grads.size(); ++j) {
+    const string& blob_name = this->net_->blob_names()[j];
+    bool grad_should_change = true;
+    if (blob_name == "innerproduct1_innerproduct1_0_split_0") {
+      grad_should_change = false;
+    }
+    ASSERT_EQ(blob_grads[j]->count(), blob_grads_loss_3[j]->count());
+    ASSERT_EQ(blob_grads_loss_2[j]->count(), blob_grads_loss_3[j]->count());
+    for (int k = 0; k < blob_grads[j]->count(); ++k) {
+      const Dtype grad_diff_2 = blob_grads_loss_2[j]->cpu_diff()[k] -
+                                    blob_grads[j]->cpu_diff()[k];
+      const Dtype grad_diff_3 = blob_grads_loss_3[j]->cpu_diff()[k] -
+                                    blob_grads[j]->cpu_diff()[k];
+      if (grad_should_change) {
+        // Test non-triviality.
+        const Dtype kMinGradDiffAbsValue = 1e-4;
+        EXPECT_GT(fabs(grad_diff_2), kMinGradDiffAbsValue) << blob_name;
+        EXPECT_NEAR(2 * grad_diff_2, grad_diff_3, kErrorMargin) << blob_name;
+      } else {
+        EXPECT_EQ(0, grad_diff_2) << blob_name;
+        EXPECT_EQ(0, grad_diff_3) << blob_name;
+      }
+    }
+  }
+
+  loss_weight = 1;
+  midnet_loss_weight = 2;
+  Caffe::set_random_seed(this->seed_);
+  this->InitUnsharedWeightsNet(&loss_weight, &midnet_loss_weight,
+                               kForceBackward);
+  const Dtype loss_midnet_2 = this->net_->ForwardBackward(bottom);
+  this->CopyNetBlobs(kCopyDiff, &blob_grads_loss_2);
+  this->CopyNetParams(kCopyDiff, &param_grads_loss_2);
+
+  loss_weight = 1;
+  midnet_loss_weight = 3;
+  Caffe::set_random_seed(this->seed_);
+  this->InitUnsharedWeightsNet(&loss_weight, &midnet_loss_weight,
+                               kForceBackward);
+  const Dtype loss_midnet_3 = this->net_->ForwardBackward(bottom);
+  const vector<shared_ptr<Blob<Dtype> > >& blob_grads_midnet_loss_3 =
+      this->net_->blobs();
+  ASSERT_EQ(blob_grads.size(), blob_grads_midnet_loss_3.size());
+  ASSERT_E

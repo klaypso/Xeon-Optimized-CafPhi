@@ -887,4 +887,106 @@ TYPED_TEST(NetTest, TestComboLossWeight) {
   const vector<shared_ptr<Blob<Dtype> > >& blob_grads_midnet_loss_3 =
       this->net_->blobs();
   ASSERT_EQ(blob_grads.size(), blob_grads_midnet_loss_3.size());
-  ASSERT_E
+  ASSERT_EQ(blob_grads_loss_2.size(), blob_grads_midnet_loss_3.size());
+  const vector<string>& blob_names = this->net_->blob_names();
+  for (int j = 0; j < blob_grads.size(); ++j) {
+    const string& blob_name = blob_names[j];
+    bool grad_should_change = false;
+    if (blob_name == "innerproduct1" ||
+        blob_name == "innerproduct1_innerproduct1_0_split_0" ||
+        blob_name == "data_data_0_split_0" || blob_name == "data") {
+      grad_should_change = true;
+    }
+    ASSERT_EQ(blob_grads[j]->count(), blob_grads_midnet_loss_3[j]->count());
+    ASSERT_EQ(blob_grads[j]->count(), blob_grads_loss_2[j]->count());
+    for (int k = 0; k < blob_grads[j]->count(); ++k) {
+      const Dtype grad_diff_2 = blob_grads_loss_2[j]->cpu_diff()[k] -
+                                    blob_grads[j]->cpu_diff()[k];
+      const Dtype grad_diff_3 = blob_grads_midnet_loss_3[j]->cpu_diff()[k] -
+                                    blob_grads[j]->cpu_diff()[k];
+      if (grad_should_change) {
+        // Test non-triviality.
+        const Dtype kMinGradDiffAbsValue = 1e-4;
+        EXPECT_GT(fabs(grad_diff_2), kMinGradDiffAbsValue) << blob_name;
+        EXPECT_NEAR(2 * grad_diff_2, grad_diff_3, kErrorMargin) << blob_name;
+      } else {
+        EXPECT_EQ(0, grad_diff_2) << blob_name;
+        EXPECT_EQ(0, grad_diff_3) << blob_name;
+      }
+    }
+  }
+
+  const Dtype kMinLossDiffAbsValue = 1e-4;
+
+  Dtype loss_diff_2 = loss_main_2 - loss;
+  // Test non-triviality.
+  EXPECT_GT(fabs(loss_diff_2), kMinLossDiffAbsValue);
+  Dtype loss_diff_3 = loss_main_3 - loss;
+  EXPECT_NEAR(2 * loss_diff_2, loss_diff_3, kErrorMargin);
+
+  loss_diff_2 = loss_midnet_2 - loss;
+  // Test non-triviality.
+  EXPECT_GT(fabs(loss_diff_2), kMinLossDiffAbsValue);
+  loss_diff_3 = loss_midnet_3 - loss;
+  EXPECT_NEAR(2 * loss_diff_2, loss_diff_3, kErrorMargin);
+}
+
+TYPED_TEST(NetTest, TestBackwardWithAccuracyLayer) {
+  typedef typename TypeParam::Dtype Dtype;
+  const bool kForceBackward = false;
+  const bool kAccuracyLayer = true;
+  this->InitTinyNet(kForceBackward, kAccuracyLayer);
+  EXPECT_TRUE(this->net_->has_blob("accuracy"));
+  vector<Blob<Dtype>*> bottom;
+  // Test that we can do Backward even though we have an 'Accuracy' layer.
+  this->net_->ForwardBackward(bottom);
+}
+
+TYPED_TEST(NetTest, TestUnsharedWeightsDataNet) {
+  typedef typename TypeParam::Dtype Dtype;
+  this->InitUnsharedWeightsNet();
+  vector<Blob<Dtype>*> bottom;
+  Dtype loss;
+  this->net_->Forward(bottom, &loss);
+  EXPECT_GT(loss, 0);
+}
+
+TYPED_TEST(NetTest, TestSharedWeightsDataNet) {
+  typedef typename TypeParam::Dtype Dtype;
+  this->InitSharedWeightsNet();
+  vector<Blob<Dtype>*> bottom;
+  Dtype loss;
+  this->net_->Forward(bottom, &loss);
+  EXPECT_FLOAT_EQ(loss, 0);
+}
+
+TYPED_TEST(NetTest, TestUnsharedWeightsDiffNet) {
+  typedef typename TypeParam::Dtype Dtype;
+  this->InitUnsharedWeightsNet();
+  vector<Blob<Dtype>*> bottom;
+  Net<Dtype>* net = this->net_.get();
+  net->Forward(bottom);
+  net->Backward();
+  Layer<Dtype>* ip1_layer = net->layer_by_name("innerproduct1").get();
+  Layer<Dtype>* ip2_layer = net->layer_by_name("innerproduct2").get();
+  const int count = ip1_layer->blobs()[0]->count();
+  const Dtype* grad1 = ip1_layer->blobs()[0]->cpu_diff();
+  const Dtype* grad2 = ip2_layer->blobs()[0]->cpu_diff();
+  for (int i = 0; i < count; ++i) {
+    EXPECT_GT(fabs(grad1[i]), 0);
+    EXPECT_FLOAT_EQ(-1 * grad1[i], grad2[i]);
+  }
+}
+
+TYPED_TEST(NetTest, TestSharedWeightsDiffNet) {
+  typedef typename TypeParam::Dtype Dtype;
+  this->InitSharedWeightsNet();
+  vector<Blob<Dtype>*> bottom;
+  Net<Dtype>* net = this->net_.get();
+  Dtype loss;
+  net->Forward(bottom, &loss);
+  net->Backward();
+  EXPECT_FLOAT_EQ(loss, 0);
+  Layer<Dtype>* ip1_layer = net->layer_by_name("innerproduct1").get();
+  Layer<Dtype>* ip2_layer = net->layer_by_name("innerproduct2").get();
+  c

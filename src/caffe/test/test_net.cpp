@@ -1068,4 +1068,86 @@ TYPED_TEST(NetTest, TestSharedWeightsUpdate) {
     EXPECT_EQ(ip1_weights->cpu_diff()[i] + ip2_weights->cpu_diff()[i],
               shared_params.cpu_diff()[i]);
   }
-  caffe_axpy(count, Dtype(-1), i
+  caffe_axpy(count, Dtype(-1), ip1_weights->cpu_diff(),
+             unshared_params1.mutable_cpu_data());
+  caffe_axpy(count, Dtype(-1), ip2_weights->cpu_diff(),
+             unshared_params2.mutable_cpu_data());
+  const Dtype* expected_updated_params1 = unshared_params1.cpu_data();
+  const Dtype* expected_updated_params2 = unshared_params2.cpu_data();
+  this->net_->Update();
+  const Dtype* actual_updated_params1 = ip1_weights->cpu_data();
+  const Dtype* actual_updated_params2 = ip2_weights->cpu_data();
+  for (int i = 0; i < count; ++i) {
+    EXPECT_EQ(expected_updated_params1[i], actual_updated_params1[i]);
+    EXPECT_EQ(expected_updated_params2[i], actual_updated_params2[i]);
+    EXPECT_NE(actual_updated_params1[i], actual_updated_params2[i]);
+    EXPECT_NE(expected_updated_params, expected_updated_params1);
+  }
+}
+
+TYPED_TEST(NetTest, TestSharedWeightsResume) {
+  typedef typename TypeParam::Dtype Dtype;
+
+  // Create a net with weight sharing; Update it once.
+  Caffe::set_random_seed(this->seed_);
+  this->InitDiffDataSharedWeightsNet();
+  vector<Blob<Dtype>*> bottom;
+  EXPECT_EQ(this->net_->layer_names()[1], "innerproduct1");
+  EXPECT_EQ(this->net_->layer_names()[2], "innerproduct2");
+  Blob<Dtype>* ip1_weights = this->net_->layers()[1]->blobs()[0].get();
+  Blob<Dtype>* ip2_weights = this->net_->layers()[2]->blobs()[0].get();
+  // Check that data blobs of shared weights share the same location in memory.
+  EXPECT_EQ(ip1_weights->cpu_data(), ip2_weights->cpu_data());
+  // Check that diff blobs of shared weights are at different locations in
+  // memory.  (The diffs should be accumulated at update time.)
+  EXPECT_NE(ip1_weights->cpu_diff(), ip2_weights->cpu_diff());
+  this->net_->ForwardBackward(bottom);
+  this->net_->Update();
+  Blob<Dtype> shared_params;
+  const bool kReshape = true;
+  const bool kCopyDiff = false;
+  shared_params.CopyFrom(*ip1_weights, kCopyDiff, kReshape);
+  const int count = ip1_weights->count();
+
+  // Write the net to a NetParameter, as in Solver::Snapshot.
+  NetParameter net_param;
+  this->net_->ToProto(&net_param);
+
+  // Reinitialize the net and copy parameters from net_param, as in
+  // Solver::Restore.
+  Caffe::set_random_seed(this->seed_);
+  this->InitDiffDataSharedWeightsNet();
+  this->net_->CopyTrainedLayersFrom(net_param);
+  ip1_weights = this->net_->layers()[1]->blobs()[0].get();
+  ip2_weights = this->net_->layers()[2]->blobs()[0].get();
+  ASSERT_FALSE(NULL == ip1_weights);
+  ASSERT_FALSE(NULL == ip2_weights);
+  EXPECT_NE(ip1_weights, ip2_weights);
+  // Check that data blobs of shared weights share the same location in memory.
+  EXPECT_EQ(ip1_weights->cpu_data(), ip2_weights->cpu_data());
+  for (int i = 0; i < count; ++i) {
+    EXPECT_FLOAT_EQ(shared_params.cpu_data()[i], ip1_weights->cpu_data()[i]);
+  }
+  // Check that diff blobs of shared weights are at different locations in
+  // memory.  (The diffs should be accumulated at update time.)
+  EXPECT_NE(ip1_weights->cpu_diff(), ip2_weights->cpu_diff());
+}
+
+TYPED_TEST(NetTest, TestParamPropagateDown) {
+  typedef typename TypeParam::Dtype Dtype;
+  vector<Blob<Dtype>*> bottom;
+  const bool kBiasTerm = true, kForceBackward = false;
+  const Dtype* kLossWeight1 = NULL;
+  const Dtype* kLossWeight2 = NULL;
+
+  // Run the net with all params learned; check that gradients are non-zero.
+  Caffe::set_random_seed(this->seed_);
+  Dtype blobs_lr_w1 = 1, blobs_lr_w2 = 1, blobs_lr_b1 = 2, blobs_lr_b2 = 2;
+  this->InitUnsharedWeightsNet(kLossWeight1, kLossWeight2, kForceBackward,
+      kBiasTerm, blobs_lr_w1, blobs_lr_w2, blobs_lr_b1, blobs_lr_b2);
+  this->net_->Forward(bottom);
+  this->net_->Backward();
+  const vector<shared_ptr<Blob<Dtype> > >& params = this->net_->params();
+  const int num_params = params.size();
+  ASSERT_EQ(4, num_params);
+  const Dtype 

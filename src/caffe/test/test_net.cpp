@@ -1249,4 +1249,147 @@ TYPED_TEST(NetTest, TestFromTo) {
   }
 }
 
-class FilterNetTest : public ::tes
+class FilterNetTest : public ::testing::Test {
+ protected:
+  void RunFilterNetTest(
+      const string& input_param_string, const string& filtered_param_string) {
+    NetParameter input_param;
+    CHECK(google::protobuf::TextFormat::ParseFromString(
+        input_param_string, &input_param));
+    NetParameter expected_filtered_param;
+    CHECK(google::protobuf::TextFormat::ParseFromString(
+        filtered_param_string, &expected_filtered_param));
+    NetParameter actual_filtered_param;
+    Net<float>::FilterNet(input_param, &actual_filtered_param);
+    EXPECT_EQ(expected_filtered_param.DebugString(),
+        actual_filtered_param.DebugString());
+    // Also test idempotence.
+    NetParameter double_filtered_param;
+    Net<float>::FilterNet(actual_filtered_param, &double_filtered_param);
+    EXPECT_EQ(actual_filtered_param.DebugString(),
+       double_filtered_param.DebugString());
+  }
+};
+
+TEST_F(FilterNetTest, TestNoFilter) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, input_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterLeNetTrainTest) {
+  const string& input_proto =
+      "name: 'LeNet' "
+      "layer { "
+      "  name: 'mnist' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "  data_param { "
+      "    source: 'mnist-train-leveldb' "
+      "    batch_size: 64 "
+      "  } "
+      "  transform_param { "
+      "    scale: 0.00390625 "
+      "  } "
+      "  include: { phase: TRAIN } "
+      "} "
+      "layer { "
+      "  name: 'mnist' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "  data_param { "
+      "    source: 'mnist-test-leveldb' "
+      "    batch_size: 100 "
+      "  } "
+      "  transform_param { "
+      "    scale: 0.00390625 "
+      "  } "
+      "  include: { phase: TEST } "
+      "} "
+      "layer { "
+      "  name: 'conv1' "
+      "  type: 'Convolution' "
+      "  bottom: 'data' "
+      "  top: 'conv1' "
+      "  param { "
+      "    lr_mult: 1 "
+      "  } "
+      "  param { "
+      "    lr_mult: 2 "
+      "  } "
+      "  convolution_param { "
+      "    num_output: 20 "
+      "    kernel_size: 5 "
+      "    stride: 1 "
+      "    weight_filler { "
+      "      type: 'xavier' "
+      "    } "
+      "    bias_filler { "
+      "      type: 'constant' "
+      "    } "
+      "  } "
+      "} "
+      "layer { "
+      "  name: 'ip1' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'conv1' "
+      "  top: 'ip1' "
+      "  param { "
+      "    lr_mult: 1 "
+      "  } "
+      "  param { "
+      "    lr_mult: 2 "
+      "  } "
+      "  inner_product_param { "
+      "    num_output: 10 "
+      "    weight_filler { "
+      "      type: 'xavier' "
+      "    } "
+      "    bias_filler { "
+      "      type: 'constant' "
+      "    } "
+      "  } "
+      "} "
+      "layer { "
+      "  name: 'accuracy' "
+      "  type: 'Accuracy' "
+      "  bottom: 'ip1' "
+      "  bottom: 'label' "
+      "  top: 'accuracy' "
+      "  include: { phase: TEST } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'ip2' "
+      "  bottom: 'label' "
+      "  top: 'loss' "
+      "} ";
+  const string input_proto_train = "state: { phase: TRAIN } " + input_proto;
+  const string input_proto_test = "state: { phase: TEST } " + input_proto;
+  const string output_proto_train =
+      "name: 'LeNet' "
+      "layer { "
+      "  name: 'mnist' "
+      "  type: 'Data' "
+     

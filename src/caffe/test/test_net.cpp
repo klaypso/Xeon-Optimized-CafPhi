@@ -1994,4 +1994,136 @@ TEST_F(FilterNetTest, TestFilterInByMaxLevel2) {
       "layer { "
       "  name: 'innerprod' "
       "  type: 'InnerProduct' "
-      "  bottom: 'data' 
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { max_level: -3 } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, input_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterInOutByIncludeMultiRule) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { min_level: 2  phase: TRAIN } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "  include: { min_level: 2  phase: TEST } "
+      "} ";
+  const string& input_proto_train =
+      "state: { level: 4  phase: TRAIN } " + input_proto;
+  const string& input_proto_test =
+      "state: { level: 4  phase: TEST } " + input_proto;
+  const string& output_proto_train =
+      "state: { level: 4  phase: TRAIN } "
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { min_level: 2  phase: TRAIN } "
+      "} ";
+  const string& output_proto_test =
+      "state: { level: 4  phase: TEST } "
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "  include: { min_level: 2  phase: TEST } "
+      "} ";
+  this->RunFilterNetTest(input_proto_train, output_proto_train);
+  this->RunFilterNetTest(input_proto_test, output_proto_test);
+}
+
+TEST_F(FilterNetTest, TestFilterInByIncludeMultiRule) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { min_level: 2  phase: TRAIN } "
+      "  include: { phase: TEST } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "  include: { min_level: 2  phase: TEST } "
+      "  include: { phase: TRAIN } "
+      "} ";
+  const string& input_proto_train =
+      "state: { level: 2  phase: TRAIN } " + input_proto;
+  const string& input_proto_test =
+      "state: { level: 2  phase: TEST } " + input_proto;
+  this->RunFilterNetTest(input_proto_train, input_proto_train);
+  this->RunFilterNetTest(input_proto_test, input_proto_test);
+}
+
+TEST_F(FilterNetTest, TestFilterInOutByExcludeMultiRule) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  exclude: { min_level: 2  phase: TRAIN } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "  exclude: { min_level: 2  phase: TEST } "
+      "} ";
+  const string& input_proto_train 

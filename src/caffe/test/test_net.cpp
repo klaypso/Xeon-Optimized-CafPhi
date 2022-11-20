@@ -1840,4 +1840,158 @@ TEST_F(FilterNetTest, TestFilterOutByMinLevel) {
       "  name: 'innerprod' "
       "  type: 'InnerProduct' "
       "  bottom: 'data' "
-      
+      "  top: 'innerprod' "
+      "  include: { min_level: 3 } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  const string& output_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, output_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterOutByMaxLevel) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { max_level: -3 } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  const string& output_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, output_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterInByMinLevel) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { min_level: 0 } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, input_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterInByMinLevel2) {
+  const string& input_proto =
+      "state: { level: 7 } "
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { min_level: 3 } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, input_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterInByMaxLevel) {
+  const string& input_proto =
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  include: { max_level: 0 } "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "} ";
+  this->RunFilterNetTest(input_proto, input_proto);
+}
+
+TEST_F(FilterNetTest, TestFilterInByMaxLevel2) {
+  const string& input_proto =
+      "state: { level: -7 } "
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' 

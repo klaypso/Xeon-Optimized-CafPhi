@@ -2126,4 +2126,102 @@ TEST_F(FilterNetTest, TestFilterInOutByExcludeMultiRule) {
       "  bottom: 'label' "
       "  exclude: { min_level: 2  phase: TEST } "
       "} ";
-  const string& input_proto_train 
+  const string& input_proto_train =
+      "state: { level: 4  phase: TRAIN } " + input_proto;
+  const string& input_proto_test =
+      "state: { level: 4  phase: TEST } " + input_proto;
+  const string& output_proto_train =
+      "state: { level: 4  phase: TRAIN } "
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'loss' "
+      "  type: 'SoftmaxWithLoss' "
+      "  bottom: 'innerprod' "
+      "  bottom: 'label' "
+      "  exclude: { min_level: 2  phase: TEST } "
+      "} ";
+  const string& output_proto_test =
+      "state: { level: 4  phase: TEST } "
+      "name: 'TestNetwork' "
+      "layer { "
+      "  name: 'data' "
+      "  type: 'Data' "
+      "  top: 'data' "
+      "  top: 'label' "
+      "} "
+      "layer { "
+      "  name: 'innerprod' "
+      "  type: 'InnerProduct' "
+      "  bottom: 'data' "
+      "  top: 'innerprod' "
+      "  exclude: { min_level: 2  phase: TRAIN } "
+      "} ";
+  this->RunFilterNetTest(input_proto_train, output_proto_train);
+  this->RunFilterNetTest(input_proto_test, output_proto_test);
+}
+
+TYPED_TEST(NetTest, TestReshape) {
+  typedef typename TypeParam::Dtype Dtype;
+  // We set up bottom blobs of two different sizes, switch between
+  // them, and check that forward and backward both run and the results
+  // are the same.
+  Caffe::set_random_seed(this->seed_);
+  Caffe::set_mode(Caffe::CPU);
+  FillerParameter filler_param;
+  filler_param.set_std(1);
+  GaussianFiller<Dtype> filler(filler_param);
+  Blob<Dtype> blob1(4, 3, 9, 11);
+  Blob<Dtype> blob2(2, 3, 12, 10);
+  filler.Fill(&blob1);
+  filler.Fill(&blob2);
+
+  this->InitReshapableNet();
+  Blob<Dtype>* input_blob = this->net_->input_blobs()[0];
+  Blob<Dtype>* output_blob = this->net_->output_blobs()[0];
+  input_blob->Reshape(blob1.num(), blob1.channels(), blob1.height(),
+      blob1.width());
+  caffe_copy(blob1.count(), blob1.cpu_data(), input_blob->mutable_cpu_data());
+  this->net_->ForwardPrefilled();
+  // call backward just to make sure it runs
+  this->net_->Backward();
+  Blob<Dtype> output1(output_blob->num(), output_blob->channels(),
+      output_blob->height(), output_blob->width());
+  caffe_copy(output1.count(), output_blob->cpu_data(),
+      output1.mutable_cpu_data());
+
+  input_blob->Reshape(blob2.num(), blob2.channels(), blob2.height(),
+      blob2.width());
+  caffe_copy(blob2.count(), blob2.cpu_data(), input_blob->mutable_cpu_data());
+  this->net_->ForwardPrefilled();
+  this->net_->Backward();
+  Blob<Dtype> output2(output_blob->num(), output_blob->channels(),
+      output_blob->height(), output_blob->width());
+  caffe_copy(output2.count(), output_blob->cpu_data(),
+      output2.mutable_cpu_data());
+
+  input_blob->Reshape(blob1.num(), blob1.channels(), blob1.height(),
+      blob1.width());
+  caffe_copy(blob1.count(), blob1.cpu_data(), input_blob->mutable_cpu_data());
+  this->net_->ForwardPrefilled();
+  this->net_->Backward();
+  for (int i = 0; i < output1.count(); ++i) {
+    CHECK_EQ(*(output1.cpu_data() + i), *(output_blob->cpu_data() + i));
+  }
+
+  input_blob->Reshape(blob2.num(), blob2.channels(), blob2.height(),
+      blob2.width());
+  caffe_copy(blob2.count(), blob2.cpu_data(), input_blob->mutable_cpu_data());
+  this->net_->ForwardPrefilled();
+  this->net_->Backward();
+  for (int i = 0; i < output2.count(); ++i) {
+    CHECK_EQ(*(output2.cpu_data() + i), *(output_blob->cpu_data() + i));
+  }
+}
+
+}  // namespace caffe

@@ -1103,3 +1103,92 @@ TYPED_TEST(CuDNNPoolingLayerTest, TestForwardMaxPaddedCuDNN) {
   EXPECT_NEAR(this->blob_top_->cpu_data()[7], 4, epsilon);
   EXPECT_NEAR(this->blob_top_->cpu_data()[8], 1, epsilon);
 }
+
+/*
+TYPED_TEST(CuDNNPoolingLayerTest, TestGradientMaxTopMaskCuDNN) {
+  Caffe::set_mode(Caffe::GPU);
+  for (int kernel_h = 3; kernel_h <= 4; kernel_h++) {
+    for (int kernel_w = 3; kernel_w <= 4; kernel_w++) {
+      LayerParameter layer_param;
+      PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+      pooling_param->set_kernel_h(kernel_h);
+      pooling_param->set_kernel_w(kernel_w);
+      pooling_param->set_stride(2);
+      pooling_param->set_pool(PoolingParameter_PoolMethod_MAX);
+      this->blob_top_vec_.push_back(this->blob_top_mask_);
+      CuDNNPoolingLayer<TypeParam> layer(layer_param);
+      GradientChecker<TypeParam> checker(1e-4, 1e-2);
+      checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+          this->blob_top_vec_);
+      this->blob_top_vec_.pop_back();
+    }
+  }
+}
+*/
+
+TYPED_TEST(CuDNNPoolingLayerTest, TestForwardAveCuDNN) {
+  Caffe::set_mode(Caffe::GPU);
+  LayerParameter layer_param;
+  PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+  pooling_param->set_kernel_size(3);
+  pooling_param->set_stride(1);
+  // Currently, cuDNN pooling does not support padding, so we use
+  // a simplified version of this test.
+  pooling_param->set_pad(0);
+  pooling_param->set_pool(PoolingParameter_PoolMethod_AVE);
+  this->blob_bottom_->Reshape(1, 1, 3, 3);
+  FillerParameter filler_param;
+  filler_param.set_value(TypeParam(2));
+  ConstantFiller<TypeParam> filler(filler_param);
+  filler.Fill(this->blob_bottom_);
+  CuDNNPoolingLayer<TypeParam> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_->num(), 1);
+  EXPECT_EQ(this->blob_top_->channels(), 1);
+  EXPECT_EQ(this->blob_top_->height(), 1);
+  EXPECT_EQ(this->blob_top_->width(), 1);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  TypeParam epsilon = 1e-5;
+  EXPECT_NEAR(this->blob_top_->cpu_data()[0], 2.0, epsilon);
+}
+
+TYPED_TEST(CuDNNPoolingLayerTest, TestGradientAveCuDNN) {
+  Caffe::set_mode(Caffe::GPU);
+  for (int kernel_h = 3; kernel_h <= 4; kernel_h++) {
+    for (int kernel_w = 3; kernel_w <= 4; kernel_w++) {
+      LayerParameter layer_param;
+      PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+      pooling_param->set_kernel_h(kernel_h);
+      pooling_param->set_kernel_w(kernel_w);
+      pooling_param->set_stride(2);
+      pooling_param->set_pool(PoolingParameter_PoolMethod_AVE);
+      CuDNNPoolingLayer<TypeParam> layer(layer_param);
+      GradientChecker<TypeParam> checker(1e-2, 1e-2);
+      checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+          this->blob_top_vec_);
+    }
+  }
+}
+
+TYPED_TEST(CuDNNPoolingLayerTest, TestGradientAvePaddedCuDNN) {
+  Caffe::set_mode(Caffe::GPU);
+  for (int kernel_h = 3; kernel_h <= 4; kernel_h++) {
+    for (int kernel_w = 3; kernel_w <= 4; kernel_w++) {
+      LayerParameter layer_param;
+      PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+      pooling_param->set_kernel_h(kernel_h);
+      pooling_param->set_kernel_w(kernel_w);
+      pooling_param->set_stride(2);
+      pooling_param->set_pad(2);
+      pooling_param->set_pool(PoolingParameter_PoolMethod_AVE);
+      CuDNNPoolingLayer<TypeParam> layer(layer_param);
+      GradientChecker<TypeParam> checker(1e-2, 1e-2);
+      checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+          this->blob_top_vec_);
+    }
+  }
+}
+
+#endif
+
+}  // namespace caffe

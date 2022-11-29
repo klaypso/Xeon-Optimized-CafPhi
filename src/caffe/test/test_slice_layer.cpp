@@ -124,4 +124,66 @@ TYPED_TEST(SliceLayerTest, TestSliceAcrossChannels) {
   // Slice at 2, 8: should produce output blobs with #channels 2, 6, 4.
   const int kSlicePoint0 = 2;
   const int kSlicePoint1 = 8;
-  layer_param.mutable_sl
+  layer_param.mutable_slice_param()->add_slice_point(kSlicePoint0);
+  layer_param.mutable_slice_param()->add_slice_point(kSlicePoint1);
+  SliceLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_1_);
+  ASSERT_EQ(kSlicePoint0, this->blob_top_0_->channels());
+  ASSERT_EQ(kSlicePoint1 - kSlicePoint0, this->blob_top_1_->channels());
+  ASSERT_EQ(this->blob_bottom_->channels() - kSlicePoint1,
+            this->blob_top_2_->channels());
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_1_);
+  for (int n = 0; n < this->blob_bottom_->num(); ++n) {
+    for (int c = 0; c < this->blob_top_0_->channels(); ++c) {
+      for (int h = 0; h < this->blob_bottom_->height(); ++h) {
+        for (int w = 0; w < this->blob_bottom_->width(); ++w) {
+          EXPECT_EQ(this->blob_bottom_->data_at(n, c, h, w),
+              this->blob_top_0_->data_at(n, c, h, w));
+        }
+      }
+    }
+    for (int c = 0; c < this->blob_top_1_->channels(); ++c) {
+      for (int h = 0; h < this->blob_bottom_->height(); ++h) {
+        for (int w = 0; w < this->blob_bottom_->width(); ++w) {
+          EXPECT_EQ(this->blob_bottom_->data_at(n, c + kSlicePoint0, h, w),
+              this->blob_top_1_->data_at(n, c, h, w));
+        }
+      }
+    }
+    for (int c = 0; c < this->blob_top_2_->channels(); ++c) {
+      for (int h = 0; h < this->blob_bottom_->height(); ++h) {
+        for (int w = 0; w < this->blob_bottom_->width(); ++w) {
+          EXPECT_EQ(this->blob_bottom_->data_at(n, c + kSlicePoint1, h, w),
+              this->blob_top_2_->data_at(n, c, h, w));
+        }
+      }
+    }
+  }
+}
+
+TYPED_TEST(SliceLayerTest, TestGradientAcrossNum) {
+  typedef typename TypeParam::Dtype Dtype;
+  // Gradient checks are slow; reduce blob size.
+  this->ReduceBottomBlobSize();
+  LayerParameter layer_param;
+  layer_param.mutable_slice_param()->set_axis(0);
+  SliceLayer<Dtype> layer(layer_param);
+  GradientChecker<Dtype> checker(1e-2, 1e-3);
+  checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+    this->blob_top_vec_0_);
+}
+
+TYPED_TEST(SliceLayerTest, TestGradientAcrossChannels) {
+  typedef typename TypeParam::Dtype Dtype;
+  // Gradient checks are slow; reduce blob size.
+  this->ReduceBottomBlobSize();
+  LayerParameter layer_param;
+  const int kSlicePoint = 4;
+  layer_param.mutable_slice_param()->add_slice_point(kSlicePoint);
+  SliceLayer<Dtype> layer(layer_param);
+  GradientChecker<Dtype> checker(1e-2, 1e-3);
+  checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+    this->blob_top_vec_0_);
+}
+
+}  // namespace caffe

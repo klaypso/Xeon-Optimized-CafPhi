@@ -352,4 +352,93 @@ DEFINE_AND_INSTANTIATE_GPU_UNARY_FUNC(sign, y[index] = (Dtype(0) < x[index])
                                       - (x[index] < Dtype(0)));
 DEFINE_AND_INSTANTIATE_GPU_UNARY_FUNC(sgnbit, y[index] = signbit(x[index]));
 
-__global__ void popc_kernel(con
+__global__ void popc_kernel(const int n, const float* a,
+    const float* b, uint8_t* y) {
+  CUDA_KERNEL_LOOP(index, n) {
+    y[index] = __popc(static_cast<uint32_t>(a[index]) ^
+                      static_cast<uint32_t>(b[index]));
+  }
+}
+
+__global__ void popcll_kernel(const int n, const double* a,
+    const double* b, uint8_t* y) {
+  CUDA_KERNEL_LOOP(index, n) {
+    y[index] = __popcll(static_cast<uint64_t>(a[index]) ^
+                      static_cast<uint64_t>(b[index]));
+  }
+}
+
+template <>
+uint32_t caffe_gpu_hamming_distance<float>(const int n, const float* x,
+                                  const float* y) {
+  // TODO: Fix caffe_gpu_hamming_distance (see failing unit test
+  // TestHammingDistanceGPU in test_math_functions.cpp).
+  NOT_IMPLEMENTED;
+  thrust::device_vector<uint8_t> popcounts(n);
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  popc_kernel<<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS>>>(
+      n, x, y, thrust::raw_pointer_cast(popcounts.data()));
+  return thrust::reduce(popcounts.begin(), popcounts.end(),
+                        (uint32_t) 0, thrust::plus<uint32_t>());
+}
+
+template <>
+uint32_t caffe_gpu_hamming_distance<double>(const int n, const double* x,
+                                   const double* y) {
+  // TODO: Fix caffe_gpu_hamming_distance (see failing unit test
+  // TestHammingDistanceGPU in test_math_functions.cpp).
+  NOT_IMPLEMENTED;
+  thrust::device_vector<uint8_t> popcounts(n);
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  popcll_kernel<<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS>>>(
+      n, x, y, thrust::raw_pointer_cast(popcounts.data()));
+  return thrust::reduce(popcounts.begin(), popcounts.end(),
+                        /* NOLINT_NEXT_LINE(build/include_what_you_use) */
+                        (uint32_t) 0, thrust::plus<uint32_t>());
+}
+
+void caffe_gpu_rng_uniform(const int n, unsigned int* r) {
+  CURAND_CHECK(curandGenerate(Caffe::curand_generator(), r, n));
+}
+
+template <>
+void caffe_gpu_rng_uniform<float>(const int n, const float a, const float b,
+                                  float* r) {
+  CURAND_CHECK(curandGenerateUniform(Caffe::curand_generator(), r, n));
+  const float range = b - a;
+  if (range != static_cast<float>(1)) {
+    caffe_gpu_scal(n, range, r);
+  }
+  if (a != static_cast<float>(0)) {
+    caffe_gpu_add_scalar(n, a, r);
+  }
+}
+
+template <>
+void caffe_gpu_rng_uniform<double>(const int n, const double a, const double b,
+                                   double* r) {
+  CURAND_CHECK(curandGenerateUniformDouble(Caffe::curand_generator(), r, n));
+  const double range = b - a;
+  if (range != static_cast<double>(1)) {
+    caffe_gpu_scal(n, range, r);
+  }
+  if (a != static_cast<double>(0)) {
+    caffe_gpu_add_scalar(n, a, r);
+  }
+}
+
+template <>
+void caffe_gpu_rng_gaussian(const int n, const float mu, const float sigma,
+                            float* r) {
+  CURAND_CHECK(
+      curandGenerateNormal(Caffe::curand_generator(), r, n, mu, sigma));
+}
+
+template <>
+void caffe_gpu_rng_gaussian(const int n, const double mu, const double sigma,
+                            double* r) {
+  CURAND_CHECK(
+      curandGenerateNormalDouble(Caffe::curand_generator(), r, n, mu, sigma));
+}
+
+}  // namespace caffe

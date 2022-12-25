@@ -197,4 +197,111 @@ bool UpgradeV0LayerParameter(const V1LayerParameter& v0_layer_connection,
       } else if (type == "pool") {
         layer_param->mutable_pooling_param()->set_pad(v0_layer_param.pad());
       } else {
-        LOG(ERROR
+        LOG(ERROR) << "Unknown parameter pad for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_kernelsize()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->set_kernel_size(
+            v0_layer_param.kernelsize());
+      } else if (type == "pool") {
+        layer_param->mutable_pooling_param()->set_kernel_size(
+            v0_layer_param.kernelsize());
+      } else {
+        LOG(ERROR) << "Unknown parameter kernelsize for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_group()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->set_group(
+            v0_layer_param.group());
+      } else {
+        LOG(ERROR) << "Unknown parameter group for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_stride()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->set_stride(
+            v0_layer_param.stride());
+      } else if (type == "pool") {
+        layer_param->mutable_pooling_param()->set_stride(
+            v0_layer_param.stride());
+      } else {
+        LOG(ERROR) << "Unknown parameter stride for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_pool()) {
+      if (type == "pool") {
+        V0LayerParameter_PoolMethod pool = v0_layer_param.pool();
+        switch (pool) {
+        case V0LayerParameter_PoolMethod_MAX:
+          layer_param->mutable_pooling_param()->set_pool(
+              PoolingParameter_PoolMethod_MAX);
+          break;
+        case V0LayerParameter_PoolMethod_AVE:
+          layer_param->mutable_pooling_param()->set_pool(
+              PoolingParameter_PoolMethod_AVE);
+          break;
+        case V0LayerParameter_PoolMethod_STOCHASTIC:
+          layer_param->mutable_pooling_param()->set_pool(
+              PoolingParameter_PoolMethod_STOCHASTIC);
+          break;
+        default:
+          LOG(ERROR) << "Unknown pool method " << pool;
+          is_fully_compatible = false;
+        }
+      } else {
+        LOG(ERROR) << "Unknown parameter pool for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_dropout_ratio()) {
+      if (type == "dropout") {
+        layer_param->mutable_dropout_param()->set_dropout_ratio(
+            v0_layer_param.dropout_ratio());
+      } else {
+        LOG(ERROR) << "Unknown parameter dropout_ratio for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_local_size()) {
+      if (type == "lrn") {
+        layer_param->mutable_lrn_param()->set_local_size(
+            v0_layer_param.local_size());
+      } else {
+        LOG(ERROR) << "Unknown parameter local_size for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_alpha()) {
+      if (type == "lrn") {
+        layer_param->mutable_lrn_param()->set_alpha(v0_layer_param.alpha());
+      } else {
+        LOG(ERROR) << "Unknown parameter alpha for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_beta()) {
+      if (type == "lrn") {
+        layer_param->mutable_lrn_param()->set_beta(v0_layer_param.beta());
+      } else {
+        LOG(ERROR) << "Unknown parameter beta for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_k()) {
+      if (type == "lrn") {
+        layer_param->mutable_lrn_param()->set_k(v0_layer_param.k());
+      } else {
+        LOG(ERROR) << "Unknown parameter k for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_source()) {
+      if (type == "data") {
+        layer_param->mutable_data_param()->set_source(v0_layer_param.source());
+     

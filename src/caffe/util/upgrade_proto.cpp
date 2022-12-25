@@ -304,4 +304,99 @@ bool UpgradeV0LayerParameter(const V1LayerParameter& v0_layer_connection,
     if (v0_layer_param.has_source()) {
       if (type == "data") {
         layer_param->mutable_data_param()->set_source(v0_layer_param.source());
-     
+      } else if (type == "hdf5_data") {
+        layer_param->mutable_hdf5_data_param()->set_source(
+            v0_layer_param.source());
+      } else if (type == "images") {
+        layer_param->mutable_image_data_param()->set_source(
+            v0_layer_param.source());
+      } else if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_source(
+            v0_layer_param.source());
+      } else if (type == "infogain_loss") {
+        layer_param->mutable_infogain_loss_param()->set_source(
+            v0_layer_param.source());
+      } else {
+        LOG(ERROR) << "Unknown parameter source for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_scale()) {
+      layer_param->mutable_transform_param()->
+          set_scale(v0_layer_param.scale());
+    }
+    if (v0_layer_param.has_meanfile()) {
+      layer_param->mutable_transform_param()->
+          set_mean_file(v0_layer_param.meanfile());
+    }
+    if (v0_layer_param.has_batchsize()) {
+      if (type == "data") {
+        layer_param->mutable_data_param()->set_batch_size(
+            v0_layer_param.batchsize());
+      } else if (type == "hdf5_data") {
+        layer_param->mutable_hdf5_data_param()->set_batch_size(
+            v0_layer_param.batchsize());
+      } else if (type == "images") {
+        layer_param->mutable_image_data_param()->set_batch_size(
+            v0_layer_param.batchsize());
+      } else if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_batch_size(
+            v0_layer_param.batchsize());
+      } else {
+        LOG(ERROR) << "Unknown parameter batchsize for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_cropsize()) {
+      layer_param->mutable_transform_param()->
+          set_crop_size(v0_layer_param.cropsize());
+    }
+    if (v0_layer_param.has_mirror()) {
+      layer_param->mutable_transform_param()->
+          set_mirror(v0_layer_param.mirror());
+    }
+    if (v0_layer_param.has_rand_skip()) {
+      if (type == "data") {
+        layer_param->mutable_data_param()->set_rand_skip(
+            v0_layer_param.rand_skip());
+      } else if (type == "images") {
+        layer_param->mutable_image_data_param()->set_rand_skip(
+            v0_layer_param.rand_skip());
+      } else {
+        LOG(ERROR) << "Unknown parameter rand_skip for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_shuffle_images()) {
+      if (type == "images") {
+        layer_param->mutable_image_data_param()->set_shuffle(
+            v0_layer_param.shuffle_images());
+      } else {
+        LOG(ERROR) << "Unknown parameter shuffle for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_new_height()) {
+      if (type == "images") {
+        layer_param->mutable_image_data_param()->set_new_height(
+            v0_layer_param.new_height());
+      } else {
+        LOG(ERROR) << "Unknown parameter new_height for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_new_width()) {
+      if (type == "images") {
+        layer_param->mutable_image_data_param()->set_new_width(
+            v0_layer_param.new_width());
+      } else {
+        LOG(ERROR) << "Unknown parameter new_width for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_concat_dim()) {
+      if (type == "concat") {
+        layer_param->mutable_concat_param()->set_concat_dim(
+            v0_layer_param.concat_dim());
+      } else {
+        LOG(ERROR) << "Unknow

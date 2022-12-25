@@ -105,4 +105,96 @@ void UpgradeV0PaddingLayers(const NetParameter& param,
         param_upgraded_pad->mutable_layers(layer_index)->mutable_layer()
             ->set_pad(source_layer.layer().pad());
         param_upgraded_pad->mutable_layers(layer_index)
-            ->set_bottom(j, s
+            ->set_bottom(j, source_layer.bottom(0));
+      }
+    }
+    for (int j = 0; j < layer_connection.top_size(); ++j) {
+      const string& blob_name = layer_connection.top(j);
+      blob_name_to_last_top_idx[blob_name] = i;
+    }
+  }
+}
+
+bool UpgradeV0LayerParameter(const V1LayerParameter& v0_layer_connection,
+                             V1LayerParameter* layer_param) {
+  bool is_fully_compatible = true;
+  layer_param->Clear();
+  for (int i = 0; i < v0_layer_connection.bottom_size(); ++i) {
+    layer_param->add_bottom(v0_layer_connection.bottom(i));
+  }
+  for (int i = 0; i < v0_layer_connection.top_size(); ++i) {
+    layer_param->add_top(v0_layer_connection.top(i));
+  }
+  if (v0_layer_connection.has_layer()) {
+    const V0LayerParameter& v0_layer_param = v0_layer_connection.layer();
+    if (v0_layer_param.has_name()) {
+      layer_param->set_name(v0_layer_param.name());
+    }
+    const string& type = v0_layer_param.type();
+    if (v0_layer_param.has_type()) {
+      layer_param->set_type(UpgradeV0LayerType(type));
+    }
+    for (int i = 0; i < v0_layer_param.blobs_size(); ++i) {
+      layer_param->add_blobs()->CopyFrom(v0_layer_param.blobs(i));
+    }
+    for (int i = 0; i < v0_layer_param.blobs_lr_size(); ++i) {
+      layer_param->add_blobs_lr(v0_layer_param.blobs_lr(i));
+    }
+    for (int i = 0; i < v0_layer_param.weight_decay_size(); ++i) {
+      layer_param->add_weight_decay(v0_layer_param.weight_decay(i));
+    }
+    if (v0_layer_param.has_num_output()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->set_num_output(
+            v0_layer_param.num_output());
+      } else if (type == "innerproduct") {
+        layer_param->mutable_inner_product_param()->set_num_output(
+            v0_layer_param.num_output());
+      } else {
+        LOG(ERROR) << "Unknown parameter num_output for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_biasterm()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->set_bias_term(
+            v0_layer_param.biasterm());
+      } else if (type == "innerproduct") {
+        layer_param->mutable_inner_product_param()->set_bias_term(
+            v0_layer_param.biasterm());
+      } else {
+        LOG(ERROR) << "Unknown parameter biasterm for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_weight_filler()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->
+            mutable_weight_filler()->CopyFrom(v0_layer_param.weight_filler());
+      } else if (type == "innerproduct") {
+        layer_param->mutable_inner_product_param()->
+            mutable_weight_filler()->CopyFrom(v0_layer_param.weight_filler());
+      } else {
+        LOG(ERROR) << "Unknown parameter weight_filler for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_bias_filler()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->
+            mutable_bias_filler()->CopyFrom(v0_layer_param.bias_filler());
+      } else if (type == "innerproduct") {
+        layer_param->mutable_inner_product_param()->
+            mutable_bias_filler()->CopyFrom(v0_layer_param.bias_filler());
+      } else {
+        LOG(ERROR) << "Unknown parameter bias_filler for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_pad()) {
+      if (type == "conv") {
+        layer_param->mutable_convolution_param()->set_pad(v0_layer_param.pad());
+      } else if (type == "pool") {
+        layer_param->mutable_pooling_param()->set_pad(v0_layer_param.pad());
+      } else {
+        LOG(ERROR

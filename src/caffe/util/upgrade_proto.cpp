@@ -500,4 +500,95 @@ V1LayerParameter_LayerType UpgradeV0LayerType(const string& type) {
     return V1LayerParameter_LayerType_LRN;
   } else if (type == "multinomial_logistic_loss") {
     return V1LayerParameter_LayerType_MULTINOMIAL_LOGISTIC_LOSS;
-  } else i
+  } else if (type == "pool") {
+    return V1LayerParameter_LayerType_POOLING;
+  } else if (type == "relu") {
+    return V1LayerParameter_LayerType_RELU;
+  } else if (type == "sigmoid") {
+    return V1LayerParameter_LayerType_SIGMOID;
+  } else if (type == "softmax") {
+    return V1LayerParameter_LayerType_SOFTMAX;
+  } else if (type == "softmax_loss") {
+    return V1LayerParameter_LayerType_SOFTMAX_LOSS;
+  } else if (type == "split") {
+    return V1LayerParameter_LayerType_SPLIT;
+  } else if (type == "tanh") {
+    return V1LayerParameter_LayerType_TANH;
+  } else if (type == "window_data") {
+    return V1LayerParameter_LayerType_WINDOW_DATA;
+  } else {
+    LOG(FATAL) << "Unknown layer name: " << type;
+    return V1LayerParameter_LayerType_NONE;
+  }
+}
+
+bool NetNeedsDataUpgrade(const NetParameter& net_param) {
+  for (int i = 0; i < net_param.layers_size(); ++i) {
+    if (net_param.layers(i).type() == V1LayerParameter_LayerType_DATA) {
+      DataParameter layer_param = net_param.layers(i).data_param();
+      if (layer_param.has_scale()) { return true; }
+      if (layer_param.has_mean_file()) { return true; }
+      if (layer_param.has_crop_size()) { return true; }
+      if (layer_param.has_mirror()) { return true; }
+    }
+    if (net_param.layers(i).type() == V1LayerParameter_LayerType_IMAGE_DATA) {
+      ImageDataParameter layer_param = net_param.layers(i).image_data_param();
+      if (layer_param.has_scale()) { return true; }
+      if (layer_param.has_mean_file()) { return true; }
+      if (layer_param.has_crop_size()) { return true; }
+      if (layer_param.has_mirror()) { return true; }
+    }
+    if (net_param.layers(i).type() == V1LayerParameter_LayerType_WINDOW_DATA) {
+      WindowDataParameter layer_param = net_param.layers(i).window_data_param();
+      if (layer_param.has_scale()) { return true; }
+      if (layer_param.has_mean_file()) { return true; }
+      if (layer_param.has_crop_size()) { return true; }
+      if (layer_param.has_mirror()) { return true; }
+    }
+  }
+  return false;
+}
+
+#define CONVERT_LAYER_TRANSFORM_PARAM(TYPE, Name, param_name) \
+  do { \
+    if (net_param->layers(i).type() == V1LayerParameter_LayerType_##TYPE) { \
+      Name##Parameter* layer_param = \
+          net_param->mutable_layers(i)->mutable_##param_name##_param(); \
+      TransformationParameter* transform_param = \
+          net_param->mutable_layers(i)->mutable_transform_param(); \
+      if (layer_param->has_scale()) { \
+        transform_param->set_scale(layer_param->scale()); \
+        layer_param->clear_scale(); \
+      } \
+      if (layer_param->has_mean_file()) { \
+        transform_param->set_mean_file(layer_param->mean_file()); \
+        layer_param->clear_mean_file(); \
+      } \
+      if (layer_param->has_crop_size()) { \
+        transform_param->set_crop_size(layer_param->crop_size()); \
+        layer_param->clear_crop_size(); \
+      } \
+      if (layer_param->has_mirror()) { \
+        transform_param->set_mirror(layer_param->mirror()); \
+        layer_param->clear_mirror(); \
+      } \
+    } \
+  } while (0)
+
+void UpgradeNetDataTransformation(NetParameter* net_param) {
+  for (int i = 0; i < net_param->layers_size(); ++i) {
+    CONVERT_LAYER_TRANSFORM_PARAM(DATA, Data, data);
+    CONVERT_LAYER_TRANSFORM_PARAM(IMAGE_DATA, ImageData, image_data);
+    CONVERT_LAYER_TRANSFORM_PARAM(WINDOW_DATA, WindowData, window_data);
+  }
+}
+
+bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param) {
+  bool success = true;
+  if (NetNeedsV0ToV1Upgrade(*param)) {
+    // NetParameter was specified using the old style (V0LayerParameter); try to
+    // upgrade it.
+    LOG(ERROR) << "Attempting to upgrade input file specified using deprecated "
+               << "V0LayerParameter: " << param_file;
+    NetParameter original_param(*param);
+ 

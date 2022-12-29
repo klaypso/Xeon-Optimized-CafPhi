@@ -399,4 +399,105 @@ bool UpgradeV0LayerParameter(const V1LayerParameter& v0_layer_connection,
         layer_param->mutable_concat_param()->set_concat_dim(
             v0_layer_param.concat_dim());
       } else {
-        LOG(ERROR) << "Unknow
+        LOG(ERROR) << "Unknown parameter concat_dim for layer type " << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_det_fg_threshold()) {
+      if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_fg_threshold(
+            v0_layer_param.det_fg_threshold());
+      } else {
+        LOG(ERROR) << "Unknown parameter det_fg_threshold for layer type "
+                   << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_det_bg_threshold()) {
+      if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_bg_threshold(
+            v0_layer_param.det_bg_threshold());
+      } else {
+        LOG(ERROR) << "Unknown parameter det_bg_threshold for layer type "
+                   << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_det_fg_fraction()) {
+      if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_fg_fraction(
+            v0_layer_param.det_fg_fraction());
+      } else {
+        LOG(ERROR) << "Unknown parameter det_fg_fraction for layer type "
+                   << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_det_context_pad()) {
+      if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_context_pad(
+            v0_layer_param.det_context_pad());
+      } else {
+        LOG(ERROR) << "Unknown parameter det_context_pad for layer type "
+                   << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_det_crop_mode()) {
+      if (type == "window_data") {
+        layer_param->mutable_window_data_param()->set_crop_mode(
+            v0_layer_param.det_crop_mode());
+      } else {
+        LOG(ERROR) << "Unknown parameter det_crop_mode for layer type "
+                   << type;
+        is_fully_compatible = false;
+      }
+    }
+    if (v0_layer_param.has_hdf5_output_param()) {
+      if (type == "hdf5_output") {
+        layer_param->mutable_hdf5_output_param()->CopyFrom(
+            v0_layer_param.hdf5_output_param());
+      } else {
+        LOG(ERROR) << "Unknown parameter hdf5_output_param for layer type "
+                   << type;
+        is_fully_compatible = false;
+      }
+    }
+  }
+  return is_fully_compatible;
+}
+
+V1LayerParameter_LayerType UpgradeV0LayerType(const string& type) {
+  if (type == "accuracy") {
+    return V1LayerParameter_LayerType_ACCURACY;
+  } else if (type == "bnll") {
+    return V1LayerParameter_LayerType_BNLL;
+  } else if (type == "concat") {
+    return V1LayerParameter_LayerType_CONCAT;
+  } else if (type == "conv") {
+    return V1LayerParameter_LayerType_CONVOLUTION;
+  } else if (type == "data") {
+    return V1LayerParameter_LayerType_DATA;
+  } else if (type == "dropout") {
+    return V1LayerParameter_LayerType_DROPOUT;
+  } else if (type == "euclidean_loss") {
+    return V1LayerParameter_LayerType_EUCLIDEAN_LOSS;
+  } else if (type == "flatten") {
+    return V1LayerParameter_LayerType_FLATTEN;
+  } else if (type == "hdf5_data") {
+    return V1LayerParameter_LayerType_HDF5_DATA;
+  } else if (type == "hdf5_output") {
+    return V1LayerParameter_LayerType_HDF5_OUTPUT;
+  } else if (type == "im2col") {
+    return V1LayerParameter_LayerType_IM2COL;
+  } else if (type == "images") {
+    return V1LayerParameter_LayerType_IMAGE_DATA;
+  } else if (type == "infogain_loss") {
+    return V1LayerParameter_LayerType_INFOGAIN_LOSS;
+  } else if (type == "innerproduct") {
+    return V1LayerParameter_LayerType_INNER_PRODUCT;
+  } else if (type == "lrn") {
+    return V1LayerParameter_LayerType_LRN;
+  } else if (type == "multinomial_logistic_loss") {
+    return V1LayerParameter_LayerType_MULTINOMIAL_LOGISTIC_LOSS;
+  } else i

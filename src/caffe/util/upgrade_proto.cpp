@@ -591,4 +591,90 @@ bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param) {
     LOG(ERROR) << "Attempting to upgrade input file specified using deprecated "
                << "V0LayerParameter: " << param_file;
     NetParameter original_param(*param);
- 
+    if (!UpgradeV0Net(original_param, param)) {
+      success = false;
+      LOG(ERROR) << "Warning: had one or more problems upgrading "
+          << "V0NetParameter to NetParameter (see above); continuing anyway.";
+    } else {
+      LOG(INFO) << "Successfully upgraded file specified using deprecated "
+                << "V0LayerParameter";
+    }
+    LOG(ERROR) << "Note that future Caffe releases will not support "
+        << "V0NetParameter; use ./build/tools/upgrade_net_proto_text for "
+        << "prototxt and ./build/tools/upgrade_net_proto_binary for model "
+        << "weights upgrade this and any other net protos to the new format.";
+  }
+  // NetParameter uses old style data transformation fields; try to upgrade it.
+  if (NetNeedsDataUpgrade(*param)) {
+    LOG(ERROR) << "Attempting to upgrade input file specified using deprecated "
+               << "transformation parameters: " << param_file;
+    UpgradeNetDataTransformation(param);
+    LOG(INFO) << "Successfully upgraded file specified using deprecated "
+              << "data transformation parameters.";
+    LOG(ERROR) << "Note that future Caffe releases will only support "
+               << "transform_param messages for transformation fields.";
+  }
+  if (NetNeedsV1ToV2Upgrade(*param)) {
+    LOG(ERROR) << "Attempting to upgrade input file specified using deprecated "
+               << "V1LayerParameter: " << param_file;
+    NetParameter original_param(*param);
+    if (!UpgradeV1Net(original_param, param)) {
+      success = false;
+      LOG(ERROR) << "Warning: had one or more problems upgrading "
+          << "V1LayerParameter (see above); continuing anyway.";
+    } else {
+      LOG(INFO) << "Successfully upgraded file specified using deprecated "
+                << "V1LayerParameter";
+    }
+  }
+  return success;
+}
+
+bool UpgradeV1Net(const NetParameter& v1_net_param, NetParameter* net_param) {
+  bool is_fully_compatible = true;
+  if (v1_net_param.layer_size() > 0) {
+    LOG(ERROR) << "Input NetParameter to be upgraded already specifies 'layer' "
+               << "fields; these will be ignored for the upgrade.";
+    is_fully_compatible = false;
+  }
+  net_param->CopyFrom(v1_net_param);
+  net_param->clear_layers();
+  net_param->clear_layer();
+  for (int i = 0; i < v1_net_param.layers_size(); ++i) {
+    if (!UpgradeV1LayerParameter(v1_net_param.layers(i),
+                                 net_param->add_layer())) {
+      LOG(ERROR) << "Upgrade of input layer " << i << " failed.";
+      is_fully_compatible = false;
+    }
+  }
+  return is_fully_compatible;
+}
+
+bool UpgradeV1LayerParameter(const V1LayerParameter& v1_layer_param,
+                             LayerParameter* layer_param) {
+  layer_param->Clear();
+  bool is_fully_compatible = true;
+  for (int i = 0; i < v1_layer_param.bottom_size(); ++i) {
+    layer_param->add_bottom(v1_layer_param.bottom(i));
+  }
+  for (int i = 0; i < v1_layer_param.top_size(); ++i) {
+    layer_param->add_top(v1_layer_param.top(i));
+  }
+  if (v1_layer_param.has_name()) {
+    layer_param->set_name(v1_layer_param.name());
+  }
+  for (int i = 0; i < v1_layer_param.include_size(); ++i) {
+    layer_param->add_include()->CopyFrom(v1_layer_param.include(i));
+  }
+  for (int i = 0; i < v1_layer_param.exclude_size(); ++i) {
+    layer_param->add_exclude()->CopyFrom(v1_layer_param.exclude(i));
+  }
+  if (v1_layer_param.has_type()) {
+    layer_param->set_type(UpgradeV1LayerType(v1_layer_param.type()));
+  }
+  for (int i = 0; i < v1_layer_param.blobs_size(); ++i) {
+    layer_param->add_blobs()->CopyFrom(v1_layer_param.blobs(i));
+  }
+  for (int i = 0; i < v1_layer_param.param_size(); ++i) {
+    while (layer_param->param_size() <= i) { layer_param->add_param(); }
+    layer_

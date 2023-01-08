@@ -677,4 +677,103 @@ bool UpgradeV1LayerParameter(const V1LayerParameter& v1_layer_param,
   }
   for (int i = 0; i < v1_layer_param.param_size(); ++i) {
     while (layer_param->param_size() <= i) { layer_param->add_param(); }
-    layer_
+    layer_param->mutable_param(i)->set_name(v1_layer_param.param(i));
+  }
+  ParamSpec_DimCheckMode mode;
+  for (int i = 0; i < v1_layer_param.blob_share_mode_size(); ++i) {
+    while (layer_param->param_size() <= i) { layer_param->add_param(); }
+    switch (v1_layer_param.blob_share_mode(i)) {
+    case V1LayerParameter_DimCheckMode_STRICT:
+      mode = ParamSpec_DimCheckMode_STRICT;
+      break;
+    case V1LayerParameter_DimCheckMode_PERMISSIVE:
+      mode = ParamSpec_DimCheckMode_PERMISSIVE;
+      break;
+    default:
+      LOG(FATAL) << "Unknown blob_share_mode: "
+                 << v1_layer_param.blob_share_mode(i);
+      break;
+    }
+    layer_param->mutable_param(i)->set_share_mode(mode);
+  }
+  for (int i = 0; i < v1_layer_param.blobs_lr_size(); ++i) {
+    while (layer_param->param_size() <= i) { layer_param->add_param(); }
+    layer_param->mutable_param(i)->set_lr_mult(v1_layer_param.blobs_lr(i));
+  }
+  for (int i = 0; i < v1_layer_param.weight_decay_size(); ++i) {
+    while (layer_param->param_size() <= i) { layer_param->add_param(); }
+    layer_param->mutable_param(i)->set_decay_mult(
+        v1_layer_param.weight_decay(i));
+  }
+  for (int i = 0; i < v1_layer_param.loss_weight_size(); ++i) {
+    layer_param->add_loss_weight(v1_layer_param.loss_weight(i));
+  }
+  if (v1_layer_param.has_accuracy_param()) {
+    layer_param->mutable_accuracy_param()->CopyFrom(
+        v1_layer_param.accuracy_param());
+  }
+  if (v1_layer_param.has_argmax_param()) {
+    layer_param->mutable_argmax_param()->CopyFrom(
+        v1_layer_param.argmax_param());
+  }
+  if (v1_layer_param.has_concat_param()) {
+    layer_param->mutable_concat_param()->CopyFrom(
+        v1_layer_param.concat_param());
+  }
+  if (v1_layer_param.has_contrastive_loss_param()) {
+    layer_param->mutable_contrastive_loss_param()->CopyFrom(
+        v1_layer_param.contrastive_loss_param());
+  }
+  if (v1_layer_param.has_convolution_param()) {
+    layer_param->mutable_convolution_param()->CopyFrom(
+        v1_layer_param.convolution_param());
+  }
+  if (v1_layer_param.has_data_param()) {
+    layer_param->mutable_data_param()->CopyFrom(
+        v1_layer_param.data_param());
+  }
+  if (v1_layer_param.has_dropout_param()) {
+    layer_param->mutable_dropout_param()->CopyFrom(
+        v1_layer_param.dropout_param());
+  }
+  if (v1_layer_param.has_dummy_data_param()) {
+    layer_param->mutable_dummy_data_param()->CopyFrom(
+        v1_layer_param.dummy_data_param());
+  }
+  if (v1_layer_param.has_eltwise_param()) {
+    layer_param->mutable_eltwise_param()->CopyFrom(
+        v1_layer_param.eltwise_param());
+  }
+  if (v1_layer_param.has_exp_param()) {
+    layer_param->mutable_exp_param()->CopyFrom(
+        v1_layer_param.exp_param());
+  }
+  if (v1_layer_param.has_hdf5_data_param()) {
+    layer_param->mutable_hdf5_data_param()->CopyFrom(
+        v1_layer_param.hdf5_data_param());
+  }
+  if (v1_layer_param.has_hdf5_output_param()) {
+    layer_param->mutable_hdf5_output_param()->CopyFrom(
+        v1_layer_param.hdf5_output_param());
+  }
+  if (v1_layer_param.has_hinge_loss_param()) {
+    layer_param->mutable_hinge_loss_param()->CopyFrom(
+        v1_layer_param.hinge_loss_param());
+  }
+  if (v1_layer_param.has_image_data_param()) {
+    layer_param->mutable_image_data_param()->CopyFrom(
+        v1_layer_param.image_data_param());
+  }
+  if (v1_layer_param.has_infogain_loss_param()) {
+    layer_param->mutable_infogain_loss_param()->CopyFrom(
+        v1_layer_param.infogain_loss_param());
+  }
+  if (v1_layer_param.has_inner_product_param()) {
+    layer_param->mutable_inner_product_param()->CopyFrom(
+        v1_layer_param.inner_product_param());
+  }
+  if (v1_layer_param.has_lrn_param()) {
+    layer_param->mutable_lrn_param()->CopyFrom(
+        v1_layer_param.lrn_param());
+  }
+  if (v1_layer_param.has_memory_data_param(

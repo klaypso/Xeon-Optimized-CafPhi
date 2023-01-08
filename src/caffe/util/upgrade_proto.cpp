@@ -776,4 +776,111 @@ bool UpgradeV1LayerParameter(const V1LayerParameter& v1_layer_param,
     layer_param->mutable_lrn_param()->CopyFrom(
         v1_layer_param.lrn_param());
   }
-  if (v1_layer_param.has_memory_data_param(
+  if (v1_layer_param.has_memory_data_param()) {
+    layer_param->mutable_memory_data_param()->CopyFrom(
+        v1_layer_param.memory_data_param());
+  }
+  if (v1_layer_param.has_mvn_param()) {
+    layer_param->mutable_mvn_param()->CopyFrom(
+        v1_layer_param.mvn_param());
+  }
+  if (v1_layer_param.has_pooling_param()) {
+    layer_param->mutable_pooling_param()->CopyFrom(
+        v1_layer_param.pooling_param());
+  }
+  if (v1_layer_param.has_power_param()) {
+    layer_param->mutable_power_param()->CopyFrom(
+        v1_layer_param.power_param());
+  }
+  if (v1_layer_param.has_relu_param()) {
+    layer_param->mutable_relu_param()->CopyFrom(
+        v1_layer_param.relu_param());
+  }
+  if (v1_layer_param.has_sigmoid_param()) {
+    layer_param->mutable_sigmoid_param()->CopyFrom(
+        v1_layer_param.sigmoid_param());
+  }
+  if (v1_layer_param.has_softmax_param()) {
+    layer_param->mutable_softmax_param()->CopyFrom(
+        v1_layer_param.softmax_param());
+  }
+  if (v1_layer_param.has_slice_param()) {
+    layer_param->mutable_slice_param()->CopyFrom(
+        v1_layer_param.slice_param());
+  }
+  if (v1_layer_param.has_tanh_param()) {
+    layer_param->mutable_tanh_param()->CopyFrom(
+        v1_layer_param.tanh_param());
+  }
+  if (v1_layer_param.has_threshold_param()) {
+    layer_param->mutable_threshold_param()->CopyFrom(
+        v1_layer_param.threshold_param());
+  }
+  if (v1_layer_param.has_window_data_param()) {
+    layer_param->mutable_window_data_param()->CopyFrom(
+        v1_layer_param.window_data_param());
+  }
+  if (v1_layer_param.has_transform_param()) {
+    layer_param->mutable_transform_param()->CopyFrom(
+        v1_layer_param.transform_param());
+  }
+  if (v1_layer_param.has_loss_param()) {
+    layer_param->mutable_loss_param()->CopyFrom(
+        v1_layer_param.loss_param());
+  }
+  if (v1_layer_param.has_layer()) {
+    LOG(ERROR) << "Input NetParameter has V0 layer -- ignoring.";
+    is_fully_compatible = false;
+  }
+  return is_fully_compatible;
+}
+
+const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
+  switch (type) {
+  case V1LayerParameter_LayerType_NONE:
+    return "";
+  case V1LayerParameter_LayerType_ABSVAL:
+    return "AbsVal";
+  case V1LayerParameter_LayerType_ACCURACY:
+    return "Accuracy";
+  case V1LayerParameter_LayerType_ARGMAX:
+    return "ArgMax";
+  case V1LayerParameter_LayerType_BNLL:
+    return "BNLL";
+  case V1LayerParameter_LayerType_CONCAT:
+    return "Concat";
+  case V1LayerParameter_LayerType_CONTRASTIVE_LOSS:
+    return "ContrastiveLoss";
+  case V1LayerParameter_LayerType_CONVOLUTION:
+    return "Convolution";
+  case V1LayerParameter_LayerType_DECONVOLUTION:
+    return "Deconvolution";
+  case V1LayerParameter_LayerType_DATA:
+    return "Data";
+  case V1LayerParameter_LayerType_DROPOUT:
+    return "Dropout";
+  case V1LayerParameter_LayerType_DUMMY_DATA:
+    return "DummyData";
+  case V1LayerParameter_LayerType_EUCLIDEAN_LOSS:
+    return "EuclideanLoss";
+  case V1LayerParameter_LayerType_ELTWISE:
+    return "Eltwise";
+  case V1LayerParameter_LayerType_EXP:
+    return "Exp";
+  case V1LayerParameter_LayerType_FLATTEN:
+    return "Flatten";
+  case V1LayerParameter_LayerType_HDF5_DATA:
+    return "HDF5Data";
+  case V1LayerParameter_LayerType_HDF5_OUTPUT:
+    return "HDF5Output";
+  case V1LayerParameter_LayerType_HINGE_LOSS:
+    return "HingeLoss";
+  case V1LayerParameter_LayerType_IM2COL:
+    return "Im2col";
+  case V1LayerParameter_LayerType_IMAGE_DATA:
+    return "ImageData";
+  case V1LayerParameter_LayerType_INFOGAIN_LOSS:
+    return "InfogainLoss";
+  case V1LayerParameter_LayerType_INNER_PRODUCT:
+    return "InnerProduct";
+  case V1LayerP

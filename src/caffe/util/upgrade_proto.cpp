@@ -883,4 +883,58 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "InfogainLoss";
   case V1LayerParameter_LayerType_INNER_PRODUCT:
     return "InnerProduct";
-  case V1LayerP
+  case V1LayerParameter_LayerType_LRN:
+    return "LRN";
+  case V1LayerParameter_LayerType_MEMORY_DATA:
+    return "MemoryData";
+  case V1LayerParameter_LayerType_MULTINOMIAL_LOGISTIC_LOSS:
+    return "MultinomialLogisticLoss";
+  case V1LayerParameter_LayerType_MVN:
+    return "MVN";
+  case V1LayerParameter_LayerType_POOLING:
+    return "Pooling";
+  case V1LayerParameter_LayerType_POWER:
+    return "Power";
+  case V1LayerParameter_LayerType_RELU:
+    return "ReLU";
+  case V1LayerParameter_LayerType_SIGMOID:
+    return "Sigmoid";
+  case V1LayerParameter_LayerType_SIGMOID_CROSS_ENTROPY_LOSS:
+    return "SigmoidCrossEntropyLoss";
+  case V1LayerParameter_LayerType_SILENCE:
+    return "Silence";
+  case V1LayerParameter_LayerType_SOFTMAX:
+    return "Softmax";
+  case V1LayerParameter_LayerType_SOFTMAX_LOSS:
+    return "SoftmaxWithLoss";
+  case V1LayerParameter_LayerType_SPLIT:
+    return "Split";
+  case V1LayerParameter_LayerType_SLICE:
+    return "Slice";
+  case V1LayerParameter_LayerType_TANH:
+    return "TanH";
+  case V1LayerParameter_LayerType_WINDOW_DATA:
+    return "WindowData";
+  case V1LayerParameter_LayerType_THRESHOLD:
+    return "Threshold";
+  default:
+    LOG(FATAL) << "Unknown V1LayerParameter layer type: " << type;
+    return "";
+  }
+}
+
+void ReadNetParamsFromTextFileOrDie(const string& param_file,
+                                    NetParameter* param) {
+  CHECK(ReadProtoFromTextFile(param_file, param))
+      << "Failed to parse NetParameter file: " << param_file;
+  UpgradeNetAsNeeded(param_file, param);
+}
+
+void ReadNetParamsFromBinaryFileOrDie(const string& param_file,
+                                      NetParameter* param) {
+  CHECK(ReadProtoFromBinaryFile(param_file, param))
+      << "Failed to parse NetParameter file: " << param_file;
+  UpgradeNetAsNeeded(param_file, param);
+}
+
+}  // namespace caffe

@@ -5594,3 +5594,3525 @@ void WriteToShardStatusFileIfNeeded() {
       fflush(stdout);
       exit(EXIT_FAILURE);
     }
+    fclose(file);
+  }
+}
+
+// Checks whether sharding is enabled by examining the relevant
+// environment variable values. If the variables are present,
+// but inconsistent (i.e., shard_index >= total_shards), prints
+// an error and exits. If in_subprocess_for_death_test, sharding is
+// disabled because it must only be applied to the original test
+// process. Otherwise, we could filter out death tests we intended to execute.
+bool ShouldShard(const char* total_shards_env,
+                 const char* shard_index_env,
+                 bool in_subprocess_for_death_test) {
+  if (in_subprocess_for_death_test) {
+    return false;
+  }
+
+  const Int32 total_shards = Int32FromEnvOrDie(total_shards_env, -1);
+  const Int32 shard_index = Int32FromEnvOrDie(shard_index_env, -1);
+
+  if (total_shards == -1 && shard_index == -1) {
+    return false;
+  } else if (total_shards == -1 && shard_index != -1) {
+    const Message msg = Message()
+      << "Invalid environment variables: you have "
+      << kTestShardIndex << " = " << shard_index
+      << ", but have left " << kTestTotalShards << " unset.\n";
+    ColoredPrintf(COLOR_RED, msg.GetString().c_str());
+    fflush(stdout);
+    exit(EXIT_FAILURE);
+  } else if (total_shards != -1 && shard_index == -1) {
+    const Message msg = Message()
+      << "Invalid environment variables: you have "
+      << kTestTotalShards << " = " << total_shards
+      << ", but have left " << kTestShardIndex << " unset.\n";
+    ColoredPrintf(COLOR_RED, msg.GetString().c_str());
+    fflush(stdout);
+    exit(EXIT_FAILURE);
+  } else if (shard_index < 0 || shard_index >= total_shards) {
+    const Message msg = Message()
+      << "Invalid environment variables: we require 0 <= "
+      << kTestShardIndex << " < " << kTestTotalShards
+      << ", but you have " << kTestShardIndex << "=" << shard_index
+      << ", " << kTestTotalShards << "=" << total_shards << ".\n";
+    ColoredPrintf(COLOR_RED, msg.GetString().c_str());
+    fflush(stdout);
+    exit(EXIT_FAILURE);
+  }
+
+  return total_shards > 1;
+}
+
+// Parses the environment variable var as an Int32. If it is unset,
+// returns default_val. If it is not an Int32, prints an error
+// and aborts.
+Int32 Int32FromEnvOrDie(const char* var, Int32 default_val) {
+  const char* str_val = posix::GetEnv(var);
+  if (str_val == NULL) {
+    return default_val;
+  }
+
+  Int32 result;
+  if (!ParseInt32(Message() << "The value of environment variable " << var,
+                  str_val, &result)) {
+    exit(EXIT_FAILURE);
+  }
+  return result;
+}
+
+// Given the total number of shards, the shard index, and the test id,
+// returns true iff the test should be run on this shard. The test id is
+// some arbitrary but unique non-negative integer assigned to each test
+// method. Assumes that 0 <= shard_index < total_shards.
+bool ShouldRunTestOnShard(int total_shards, int shard_index, int test_id) {
+  return (test_id % total_shards) == shard_index;
+}
+
+// Compares the name of each test with the user-specified filter to
+// decide whether the test should be run, then records the result in
+// each TestCase and TestInfo object.
+// If shard_tests == true, further filters tests based on sharding
+// variables in the environment - see
+// http://code.google.com/p/googletest/wiki/GoogleTestAdvancedGuide.
+// Returns the number of tests that should run.
+int UnitTestImpl::FilterTests(ReactionToSharding shard_tests) {
+  const Int32 total_shards = shard_tests == HONOR_SHARDING_PROTOCOL ?
+      Int32FromEnvOrDie(kTestTotalShards, -1) : -1;
+  const Int32 shard_index = shard_tests == HONOR_SHARDING_PROTOCOL ?
+      Int32FromEnvOrDie(kTestShardIndex, -1) : -1;
+
+  // num_runnable_tests are the number of tests that will
+  // run across all shards (i.e., match filter and are not disabled).
+  // num_selected_tests are the number of tests to be run on
+  // this shard.
+  int num_runnable_tests = 0;
+  int num_selected_tests = 0;
+  for (size_t i = 0; i < test_cases_.size(); i++) {
+    TestCase* const test_case = test_cases_[i];
+    const String &test_case_name = test_case->name();
+    test_case->set_should_run(false);
+
+    for (size_t j = 0; j < test_case->test_info_list().size(); j++) {
+      TestInfo* const test_info = test_case->test_info_list()[j];
+      const String test_name(test_info->name());
+      // A test is disabled if test case name or test name matches
+      // kDisableTestFilter.
+      const bool is_disabled =
+          internal::UnitTestOptions::MatchesFilter(test_case_name,
+                                                   kDisableTestFilter) ||
+          internal::UnitTestOptions::MatchesFilter(test_name,
+                                                   kDisableTestFilter);
+      test_info->is_disabled_ = is_disabled;
+
+      const bool matches_filter =
+          internal::UnitTestOptions::FilterMatchesTest(test_case_name,
+                                                       test_name);
+      test_info->matches_filter_ = matches_filter;
+
+      const bool is_runnable =
+          (GTEST_FLAG(also_run_disabled_tests) || !is_disabled) &&
+          matches_filter;
+
+      const bool is_selected = is_runnable &&
+          (shard_tests == IGNORE_SHARDING_PROTOCOL ||
+           ShouldRunTestOnShard(total_shards, shard_index,
+                                num_runnable_tests));
+
+      num_runnable_tests += is_runnable;
+      num_selected_tests += is_selected;
+
+      test_info->should_run_ = is_selected;
+      test_case->set_should_run(test_case->should_run() || is_selected);
+    }
+  }
+  return num_selected_tests;
+}
+
+// Prints the names of the tests matching the user-specified filter flag.
+void UnitTestImpl::ListTestsMatchingFilter() {
+  for (size_t i = 0; i < test_cases_.size(); i++) {
+    const TestCase* const test_case = test_cases_[i];
+    bool printed_test_case_name = false;
+
+    for (size_t j = 0; j < test_case->test_info_list().size(); j++) {
+      const TestInfo* const test_info =
+          test_case->test_info_list()[j];
+      if (test_info->matches_filter_) {
+        if (!printed_test_case_name) {
+          printed_test_case_name = true;
+          printf("%s.\n", test_case->name());
+        }
+        printf("  %s\n", test_info->name());
+      }
+    }
+  }
+  fflush(stdout);
+}
+
+// Sets the OS stack trace getter.
+//
+// Does nothing if the input and the current OS stack trace getter are
+// the same; otherwise, deletes the old getter and makes the input the
+// current getter.
+void UnitTestImpl::set_os_stack_trace_getter(
+    OsStackTraceGetterInterface* getter) {
+  if (os_stack_trace_getter_ != getter) {
+    delete os_stack_trace_getter_;
+    os_stack_trace_getter_ = getter;
+  }
+}
+
+// Returns the current OS stack trace getter if it is not NULL;
+// otherwise, creates an OsStackTraceGetter, makes it the current
+// getter, and returns it.
+OsStackTraceGetterInterface* UnitTestImpl::os_stack_trace_getter() {
+  if (os_stack_trace_getter_ == NULL) {
+    os_stack_trace_getter_ = new OsStackTraceGetter;
+  }
+
+  return os_stack_trace_getter_;
+}
+
+// Returns the TestResult for the test that's currently running, or
+// the TestResult for the ad hoc test if no test is running.
+TestResult* UnitTestImpl::current_test_result() {
+  return current_test_info_ ?
+      &(current_test_info_->result_) : &ad_hoc_test_result_;
+}
+
+// Shuffles all test cases, and the tests within each test case,
+// making sure that death tests are still run first.
+void UnitTestImpl::ShuffleTests() {
+  // Shuffles the death test cases.
+  ShuffleRange(random(), 0, last_death_test_case_ + 1, &test_case_indices_);
+
+  // Shuffles the non-death test cases.
+  ShuffleRange(random(), last_death_test_case_ + 1,
+               static_cast<int>(test_cases_.size()), &test_case_indices_);
+
+  // Shuffles the tests inside each test case.
+  for (size_t i = 0; i < test_cases_.size(); i++) {
+    test_cases_[i]->ShuffleTests(random());
+  }
+}
+
+// Restores the test cases and tests to their order before the first shuffle.
+void UnitTestImpl::UnshuffleTests() {
+  for (size_t i = 0; i < test_cases_.size(); i++) {
+    // Unshuffles the tests in each test case.
+    test_cases_[i]->UnshuffleTests();
+    // Resets the index of each test case.
+    test_case_indices_[i] = static_cast<int>(i);
+  }
+}
+
+// Returns the current OS stack trace as a String.
+//
+// The maximum number of stack frames to be included is specified by
+// the gtest_stack_trace_depth flag.  The skip_count parameter
+// specifies the number of top frames to be skipped, which doesn't
+// count against the number of frames to be included.
+//
+// For example, if Foo() calls Bar(), which in turn calls
+// GetCurrentOsStackTraceExceptTop(..., 1), Foo() will be included in
+// the trace but Bar() and GetCurrentOsStackTraceExceptTop() won't.
+String GetCurrentOsStackTraceExceptTop(UnitTest* /*unit_test*/,
+                                       int skip_count) {
+  // We pass skip_count + 1 to skip this wrapper function in addition
+  // to what the user really wants to skip.
+  return GetUnitTestImpl()->CurrentOsStackTraceExceptTop(skip_count + 1);
+}
+
+// Used by the GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_ macro to
+// suppress unreachable code warnings.
+namespace {
+class ClassUniqueToAlwaysTrue {};
+}
+
+bool IsTrue(bool condition) { return condition; }
+
+bool AlwaysTrue() {
+#if GTEST_HAS_EXCEPTIONS
+  // This condition is always false so AlwaysTrue() never actually throws,
+  // but it makes the compiler think that it may throw.
+  if (IsTrue(false))
+    throw ClassUniqueToAlwaysTrue();
+#endif  // GTEST_HAS_EXCEPTIONS
+  return true;
+}
+
+// If *pstr starts with the given prefix, modifies *pstr to be right
+// past the prefix and returns true; otherwise leaves *pstr unchanged
+// and returns false.  None of pstr, *pstr, and prefix can be NULL.
+bool SkipPrefix(const char* prefix, const char** pstr) {
+  const size_t prefix_len = strlen(prefix);
+  if (strncmp(*pstr, prefix, prefix_len) == 0) {
+    *pstr += prefix_len;
+    return true;
+  }
+  return false;
+}
+
+// Parses a string as a command line flag.  The string should have
+// the format "--flag=value".  When def_optional is true, the "=value"
+// part can be omitted.
+//
+// Returns the value of the flag, or NULL if the parsing failed.
+const char* ParseFlagValue(const char* str,
+                           const char* flag,
+                           bool def_optional) {
+  // str and flag must not be NULL.
+  if (str == NULL || flag == NULL) return NULL;
+
+  // The flag must start with "--" followed by GTEST_FLAG_PREFIX_.
+  const String flag_str = String::Format("--%s%s", GTEST_FLAG_PREFIX_, flag);
+  const size_t flag_len = flag_str.length();
+  if (strncmp(str, flag_str.c_str(), flag_len) != 0) return NULL;
+
+  // Skips the flag name.
+  const char* flag_end = str + flag_len;
+
+  // When def_optional is true, it's OK to not have a "=value" part.
+  if (def_optional && (flag_end[0] == '\0')) {
+    return flag_end;
+  }
+
+  // If def_optional is true and there are more characters after the
+  // flag name, or if def_optional is false, there must be a '=' after
+  // the flag name.
+  if (flag_end[0] != '=') return NULL;
+
+  // Returns the string after "=".
+  return flag_end + 1;
+}
+
+// Parses a string for a bool flag, in the form of either
+// "--flag=value" or "--flag".
+//
+// In the former case, the value is taken as true as long as it does
+// not start with '0', 'f', or 'F'.
+//
+// In the latter case, the value is taken as true.
+//
+// On success, stores the value of the flag in *value, and returns
+// true.  On failure, returns false without changing *value.
+bool ParseBoolFlag(const char* str, const char* flag, bool* value) {
+  // Gets the value of the flag as a string.
+  const char* const value_str = ParseFlagValue(str, flag, true);
+
+  // Aborts if the parsing failed.
+  if (value_str == NULL) return false;
+
+  // Converts the string value to a bool.
+  *value = !(*value_str == '0' || *value_str == 'f' || *value_str == 'F');
+  return true;
+}
+
+// Parses a string for an Int32 flag, in the form of
+// "--flag=value".
+//
+// On success, stores the value of the flag in *value, and returns
+// true.  On failure, returns false without changing *value.
+bool ParseInt32Flag(const char* str, const char* flag, Int32* value) {
+  // Gets the value of the flag as a string.
+  const char* const value_str = ParseFlagValue(str, flag, false);
+
+  // Aborts if the parsing failed.
+  if (value_str == NULL) return false;
+
+  // Sets *value to the value of the flag.
+  return ParseInt32(Message() << "The value of flag --" << flag,
+                    value_str, value);
+}
+
+// Parses a string for a string flag, in the form of
+// "--flag=value".
+//
+// On success, stores the value of the flag in *value, and returns
+// true.  On failure, returns false without changing *value.
+bool ParseStringFlag(const char* str, const char* flag, String* value) {
+  // Gets the value of the flag as a string.
+  const char* const value_str = ParseFlagValue(str, flag, false);
+
+  // Aborts if the parsing failed.
+  if (value_str == NULL) return false;
+
+  // Sets *value to the value of the flag.
+  *value = value_str;
+  return true;
+}
+
+// Determines whether a string has a prefix that Google Test uses for its
+// flags, i.e., starts with GTEST_FLAG_PREFIX_ or GTEST_FLAG_PREFIX_DASH_.
+// If Google Test detects that a command line flag has its prefix but is not
+// recognized, it will print its help message. Flags starting with
+// GTEST_INTERNAL_PREFIX_ followed by "internal_" are considered Google Test
+// internal flags and do not trigger the help message.
+static bool HasGoogleTestFlagPrefix(const char* str) {
+  return (SkipPrefix("--", &str) ||
+          SkipPrefix("-", &str) ||
+          SkipPrefix("/", &str)) &&
+         !SkipPrefix(GTEST_FLAG_PREFIX_ "internal_", &str) &&
+         (SkipPrefix(GTEST_FLAG_PREFIX_, &str) ||
+          SkipPrefix(GTEST_FLAG_PREFIX_DASH_, &str));
+}
+
+// Prints a string containing code-encoded text.  The following escape
+// sequences can be used in the string to control the text color:
+//
+//   @@    prints a single '@' character.
+//   @R    changes the color to red.
+//   @G    changes the color to green.
+//   @Y    changes the color to yellow.
+//   @D    changes to the default terminal text color.
+//
+// TODO(wan@google.com): Write tests for this once we add stdout
+// capturing to Google Test.
+static void PrintColorEncoded(const char* str) {
+  GTestColor color = COLOR_DEFAULT;  // The current color.
+
+  // Conceptually, we split the string into segments divided by escape
+  // sequences.  Then we print one segment at a time.  At the end of
+  // each iteration, the str pointer advances to the beginning of the
+  // next segment.
+  for (;;) {
+    const char* p = strchr(str, '@');
+    if (p == NULL) {
+      ColoredPrintf(color, "%s", str);
+      return;
+    }
+
+    ColoredPrintf(color, "%s", String(str, p - str).c_str());
+
+    const char ch = p[1];
+    str = p + 2;
+    if (ch == '@') {
+      ColoredPrintf(color, "@");
+    } else if (ch == 'D') {
+      color = COLOR_DEFAULT;
+    } else if (ch == 'R') {
+      color = COLOR_RED;
+    } else if (ch == 'G') {
+      color = COLOR_GREEN;
+    } else if (ch == 'Y') {
+      color = COLOR_YELLOW;
+    } else {
+      --str;
+    }
+  }
+}
+
+static const char kColorEncodedHelpMessage[] =
+"This program contains tests written using " GTEST_NAME_ ". You can use the\n"
+"following command line flags to control its behavior:\n"
+"\n"
+"Test Selection:\n"
+"  @G--" GTEST_FLAG_PREFIX_ "list_tests@D\n"
+"      List the names of all tests instead of running them. The name of\n"
+"      TEST(Foo, Bar) is \"Foo.Bar\".\n"
+"  @G--" GTEST_FLAG_PREFIX_ "filter=@YPOSTIVE_PATTERNS"
+    "[@G-@YNEGATIVE_PATTERNS]@D\n"
+"      Run only the tests whose name matches one of the positive patterns but\n"
+"      none of the negative patterns. '?' matches any single character; '*'\n"
+"      matches any substring; ':' separates two patterns.\n"
+"  @G--" GTEST_FLAG_PREFIX_ "also_run_disabled_tests@D\n"
+"      Run all disabled tests too.\n"
+"\n"
+"Test Execution:\n"
+"  @G--" GTEST_FLAG_PREFIX_ "repeat=@Y[COUNT]@D\n"
+"      Run the tests repeatedly; use a negative count to repeat forever.\n"
+"  @G--" GTEST_FLAG_PREFIX_ "shuffle@D\n"
+"      Randomize tests' orders on every iteration.\n"
+"  @G--" GTEST_FLAG_PREFIX_ "random_seed=@Y[NUMBER]@D\n"
+"      Random number seed to use for shuffling test orders (between 1 and\n"
+"      99999, or 0 to use a seed based on the current time).\n"
+"\n"
+"Test Output:\n"
+"  @G--" GTEST_FLAG_PREFIX_ "color=@Y(@Gyes@Y|@Gno@Y|@Gauto@Y)@D\n"
+"      Enable/disable colored output. The default is @Gauto@D.\n"
+"  -@G-" GTEST_FLAG_PREFIX_ "print_time=0@D\n"
+"      Don't print the elapsed time of each test.\n"
+"  @G--" GTEST_FLAG_PREFIX_ "output=xml@Y[@G:@YDIRECTORY_PATH@G"
+    GTEST_PATH_SEP_ "@Y|@G:@YFILE_PATH]@D\n"
+"      Generate an XML report in the given directory or with the given file\n"
+"      name. @YFILE_PATH@D defaults to @Gtest_details.xml@D.\n"
+#if GTEST_CAN_STREAM_RESULTS_
+"  @G--" GTEST_FLAG_PREFIX_ "stream_result_to=@YHOST@G:@YPORT@D\n"
+"      Stream test results to the given server.\n"
+#endif  // GTEST_CAN_STREAM_RESULTS_
+"\n"
+"Assertion Behavior:\n"
+#if GTEST_HAS_DEATH_TEST && !GTEST_OS_WINDOWS
+"  @G--" GTEST_FLAG_PREFIX_ "death_test_style=@Y(@Gfast@Y|@Gthreadsafe@Y)@D\n"
+"      Set the default death test style.\n"
+#endif  // GTEST_HAS_DEATH_TEST && !GTEST_OS_WINDOWS
+"  @G--" GTEST_FLAG_PREFIX_ "break_on_failure@D\n"
+"      Turn assertion failures into debugger break-points.\n"
+"  @G--" GTEST_FLAG_PREFIX_ "throw_on_failure@D\n"
+"      Turn assertion failures into C++ exceptions.\n"
+"  @G--" GTEST_FLAG_PREFIX_ "catch_exceptions=0@D\n"
+"      Do not report exceptions as test failures. Instead, allow them\n"
+"      to crash the program or throw a pop-up (on Windows).\n"
+"\n"
+"Except for @G--" GTEST_FLAG_PREFIX_ "list_tests@D, you can alternatively set "
+    "the corresponding\n"
+"environment variable of a flag (all letters in upper-case). For example, to\n"
+"disable colored text output, you can either specify @G--" GTEST_FLAG_PREFIX_
+    "color=no@D or set\n"
+"the @G" GTEST_FLAG_PREFIX_UPPER_ "COLOR@D environment variable to @Gno@D.\n"
+"\n"
+"For more information, please read the " GTEST_NAME_ " documentation at\n"
+"@G" GTEST_PROJECT_URL_ "@D. If you find a bug in " GTEST_NAME_ "\n"
+"(not one in your own code or tests), please report it to\n"
+"@G<" GTEST_DEV_EMAIL_ ">@D.\n";
+
+// Parses the command line for Google Test flags, without initializing
+// other parts of Google Test.  The type parameter CharType can be
+// instantiated to either char or wchar_t.
+template <typename CharType>
+void ParseGoogleTestFlagsOnlyImpl(int* argc, CharType** argv) {
+  for (int i = 1; i < *argc; i++) {
+    const String arg_string = StreamableToString(argv[i]);
+    const char* const arg = arg_string.c_str();
+
+    using internal::ParseBoolFlag;
+    using internal::ParseInt32Flag;
+    using internal::ParseStringFlag;
+
+    // Do we see a Google Test flag?
+    if (ParseBoolFlag(arg, kAlsoRunDisabledTestsFlag,
+                      &GTEST_FLAG(also_run_disabled_tests)) ||
+        ParseBoolFlag(arg, kBreakOnFailureFlag,
+                      &GTEST_FLAG(break_on_failure)) ||
+        ParseBoolFlag(arg, kCatchExceptionsFlag,
+                      &GTEST_FLAG(catch_exceptions)) ||
+        ParseStringFlag(arg, kColorFlag, &GTEST_FLAG(color)) ||
+        ParseStringFlag(arg, kDeathTestStyleFlag,
+                        &GTEST_FLAG(death_test_style)) ||
+        ParseBoolFlag(arg, kDeathTestUseFork,
+                      &GTEST_FLAG(death_test_use_fork)) ||
+        ParseStringFlag(arg, kFilterFlag, &GTEST_FLAG(filter)) ||
+        ParseStringFlag(arg, kInternalRunDeathTestFlag,
+                        &GTEST_FLAG(internal_run_death_test)) ||
+        ParseBoolFlag(arg, kListTestsFlag, &GTEST_FLAG(list_tests)) ||
+        ParseStringFlag(arg, kOutputFlag, &GTEST_FLAG(output)) ||
+        ParseBoolFlag(arg, kPrintTimeFlag, &GTEST_FLAG(print_time)) ||
+        ParseInt32Flag(arg, kRandomSeedFlag, &GTEST_FLAG(random_seed)) ||
+        ParseInt32Flag(arg, kRepeatFlag, &GTEST_FLAG(repeat)) ||
+        ParseBoolFlag(arg, kShuffleFlag, &GTEST_FLAG(shuffle)) ||
+        ParseInt32Flag(arg, kStackTraceDepthFlag,
+                       &GTEST_FLAG(stack_trace_depth)) ||
+        ParseStringFlag(arg, kStreamResultToFlag,
+                        &GTEST_FLAG(stream_result_to)) ||
+        ParseBoolFlag(arg, kThrowOnFailureFlag,
+                      &GTEST_FLAG(throw_on_failure))
+        ) {
+      // Yes.  Shift the remainder of the argv list left by one.  Note
+      // that argv has (*argc + 1) elements, the last one always being
+      // NULL.  The following loop moves the trailing NULL element as
+      // well.
+      for (int j = i; j != *argc; j++) {
+        argv[j] = argv[j + 1];
+      }
+
+      // Decrements the argument count.
+      (*argc)--;
+
+      // We also need to decrement the iterator as we just removed
+      // an element.
+      i--;
+    } else if (arg_string == "--help" || arg_string == "-h" ||
+               arg_string == "-?" || arg_string == "/?" ||
+               HasGoogleTestFlagPrefix(arg)) {
+      // Both help flag and unrecognized Google Test flags (excluding
+      // internal ones) trigger help display.
+      g_help_flag = true;
+    }
+  }
+
+  if (g_help_flag) {
+    // We print the help here instead of in RUN_ALL_TESTS(), as the
+    // latter may not be called at all if the user is using Google
+    // Test with another testing framework.
+    PrintColorEncoded(kColorEncodedHelpMessage);
+  }
+}
+
+// Parses the command line for Google Test flags, without initializing
+// other parts of Google Test.
+void ParseGoogleTestFlagsOnly(int* argc, char** argv) {
+  ParseGoogleTestFlagsOnlyImpl(argc, argv);
+}
+void ParseGoogleTestFlagsOnly(int* argc, wchar_t** argv) {
+  ParseGoogleTestFlagsOnlyImpl(argc, argv);
+}
+
+// The internal implementation of InitGoogleTest().
+//
+// The type parameter CharType can be instantiated to either char or
+// wchar_t.
+template <typename CharType>
+void InitGoogleTestImpl(int* argc, CharType** argv) {
+  g_init_gtest_count++;
+
+  // We don't want to run the initialization code twice.
+  if (g_init_gtest_count != 1) return;
+
+  if (*argc <= 0) return;
+
+  internal::g_executable_path = internal::StreamableToString(argv[0]);
+
+#if GTEST_HAS_DEATH_TEST
+
+  g_argvs.clear();
+  for (int i = 0; i != *argc; i++) {
+    g_argvs.push_back(StreamableToString(argv[i]));
+  }
+
+#endif  // GTEST_HAS_DEATH_TEST
+
+  ParseGoogleTestFlagsOnly(argc, argv);
+  GetUnitTestImpl()->PostFlagParsingInit();
+}
+
+}  // namespace internal
+
+// Initializes Google Test.  This must be called before calling
+// RUN_ALL_TESTS().  In particular, it parses a command line for the
+// flags that Google Test recognizes.  Whenever a Google Test flag is
+// seen, it is removed from argv, and *argc is decremented.
+//
+// No value is returned.  Instead, the Google Test flag variables are
+// updated.
+//
+// Calling the function for the second time has no user-visible effect.
+void InitGoogleTest(int* argc, char** argv) {
+  internal::InitGoogleTestImpl(argc, argv);
+}
+
+// This overloaded version can be used in Windows programs compiled in
+// UNICODE mode.
+void InitGoogleTest(int* argc, wchar_t** argv) {
+  internal::InitGoogleTestImpl(argc, argv);
+}
+
+}  // namespace testing
+// Copyright 2005, Google Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: wan@google.com (Zhanyong Wan), vladl@google.com (Vlad Losev)
+//
+// This file implements death tests.
+
+
+#if GTEST_HAS_DEATH_TEST
+
+# if GTEST_OS_MAC
+#  include <crt_externs.h>
+# endif  // GTEST_OS_MAC
+
+# include <errno.h>
+# include <fcntl.h>
+# include <limits.h>
+# include <stdarg.h>
+
+# if GTEST_OS_WINDOWS
+#  include <windows.h>
+# else
+#  include <sys/mman.h>
+#  include <sys/wait.h>
+# endif  // GTEST_OS_WINDOWS
+
+#endif  // GTEST_HAS_DEATH_TEST
+
+
+// Indicates that this translation unit is part of Google Test's
+// implementation.  It must come before gtest-internal-inl.h is
+// included, or there will be a compiler error.  This trick is to
+// prevent a user from accidentally including gtest-internal-inl.h in
+// his code.
+#define GTEST_IMPLEMENTATION_ 1
+#undef GTEST_IMPLEMENTATION_
+
+namespace testing {
+
+// Constants.
+
+// The default death test style.
+static const char kDefaultDeathTestStyle[] = "fast";
+
+GTEST_DEFINE_string_(
+    death_test_style,
+    internal::StringFromGTestEnv("death_test_style", kDefaultDeathTestStyle),
+    "Indicates how to run a death test in a forked child process: "
+    "\"threadsafe\" (child process re-executes the test binary "
+    "from the beginning, running only the specific death test) or "
+    "\"fast\" (child process runs the death test immediately "
+    "after forking).");
+
+GTEST_DEFINE_bool_(
+    death_test_use_fork,
+    internal::BoolFromGTestEnv("death_test_use_fork", false),
+    "Instructs to use fork()/_exit() instead of clone() in death tests. "
+    "Ignored and always uses fork() on POSIX systems where clone() is not "
+    "implemented. Useful when running under valgrind or similar tools if "
+    "those do not support clone(). Valgrind 3.3.1 will just fail if "
+    "it sees an unsupported combination of clone() flags. "
+    "It is not recommended to use this flag w/o valgrind though it will "
+    "work in 99% of the cases. Once valgrind is fixed, this flag will "
+    "most likely be removed.");
+
+namespace internal {
+GTEST_DEFINE_string_(
+    internal_run_death_test, "",
+    "Indicates the file, line number, temporal index of "
+    "the single death test to run, and a file descriptor to "
+    "which a success code may be sent, all separated by "
+    "colons.  This flag is specified if and only if the current "
+    "process is a sub-process launched for running a thread-safe "
+    "death test.  FOR INTERNAL USE ONLY.");
+}  // namespace internal
+
+#if GTEST_HAS_DEATH_TEST
+
+// ExitedWithCode constructor.
+ExitedWithCode::ExitedWithCode(int exit_code) : exit_code_(exit_code) {
+}
+
+// ExitedWithCode function-call operator.
+bool ExitedWithCode::operator()(int exit_status) const {
+# if GTEST_OS_WINDOWS
+
+  return exit_status == exit_code_;
+
+# else
+
+  return WIFEXITED(exit_status) && WEXITSTATUS(exit_status) == exit_code_;
+
+# endif  // GTEST_OS_WINDOWS
+}
+
+# if !GTEST_OS_WINDOWS
+// KilledBySignal constructor.
+KilledBySignal::KilledBySignal(int signum) : signum_(signum) {
+}
+
+// KilledBySignal function-call operator.
+bool KilledBySignal::operator()(int exit_status) const {
+  return WIFSIGNALED(exit_status) && WTERMSIG(exit_status) == signum_;
+}
+# endif  // !GTEST_OS_WINDOWS
+
+namespace internal {
+
+// Utilities needed for death tests.
+
+// Generates a textual description of a given exit code, in the format
+// specified by wait(2).
+static String ExitSummary(int exit_code) {
+  Message m;
+
+# if GTEST_OS_WINDOWS
+
+  m << "Exited with exit status " << exit_code;
+
+# else
+
+  if (WIFEXITED(exit_code)) {
+    m << "Exited with exit status " << WEXITSTATUS(exit_code);
+  } else if (WIFSIGNALED(exit_code)) {
+    m << "Terminated by signal " << WTERMSIG(exit_code);
+  }
+#  ifdef WCOREDUMP
+  if (WCOREDUMP(exit_code)) {
+    m << " (core dumped)";
+  }
+#  endif
+# endif  // GTEST_OS_WINDOWS
+
+  return m.GetString();
+}
+
+// Returns true if exit_status describes a process that was terminated
+// by a signal, or exited normally with a nonzero exit code.
+bool ExitedUnsuccessfully(int exit_status) {
+  return !ExitedWithCode(0)(exit_status);
+}
+
+# if !GTEST_OS_WINDOWS
+// Generates a textual failure message when a death test finds more than
+// one thread running, or cannot determine the number of threads, prior
+// to executing the given statement.  It is the responsibility of the
+// caller not to pass a thread_count of 1.
+static String DeathTestThreadWarning(size_t thread_count) {
+  Message msg;
+  msg << "Death tests use fork(), which is unsafe particularly"
+      << " in a threaded context. For this test, " << GTEST_NAME_ << " ";
+  if (thread_count == 0)
+    msg << "couldn't detect the number of threads.";
+  else
+    msg << "detected " << thread_count << " threads.";
+  return msg.GetString();
+}
+# endif  // !GTEST_OS_WINDOWS
+
+// Flag characters for reporting a death test that did not die.
+static const char kDeathTestLived = 'L';
+static const char kDeathTestReturned = 'R';
+static const char kDeathTestThrew = 'T';
+static const char kDeathTestInternalError = 'I';
+
+// An enumeration describing all of the possible ways that a death test can
+// conclude.  DIED means that the process died while executing the test
+// code; LIVED means that process lived beyond the end of the test code;
+// RETURNED means that the test statement attempted to execute a return
+// statement, which is not allowed; THREW means that the test statement
+// returned control by throwing an exception.  IN_PROGRESS means the test
+// has not yet concluded.
+// TODO(vladl@google.com): Unify names and possibly values for
+// AbortReason, DeathTestOutcome, and flag characters above.
+enum DeathTestOutcome { IN_PROGRESS, DIED, LIVED, RETURNED, THREW };
+
+// Routine for aborting the program which is safe to call from an
+// exec-style death test child process, in which case the error
+// message is propagated back to the parent process.  Otherwise, the
+// message is simply printed to stderr.  In either case, the program
+// then exits with status 1.
+void DeathTestAbort(const String& message) {
+  // On a POSIX system, this function may be called from a threadsafe-style
+  // death test child process, which operates on a very small stack.  Use
+  // the heap for any additional non-minuscule memory requirements.
+  const InternalRunDeathTestFlag* const flag =
+      GetUnitTestImpl()->internal_run_death_test_flag();
+  if (flag != NULL) {
+    FILE* parent = posix::FDOpen(flag->write_fd(), "w");
+    fputc(kDeathTestInternalError, parent);
+    fprintf(parent, "%s", message.c_str());
+    fflush(parent);
+    _exit(1);
+  } else {
+    fprintf(stderr, "%s", message.c_str());
+    fflush(stderr);
+    posix::Abort();
+  }
+}
+
+// A replacement for CHECK that calls DeathTestAbort if the assertion
+// fails.
+# define GTEST_DEATH_TEST_CHECK_(expression) \
+  do { \
+    if (!::testing::internal::IsTrue(expression)) { \
+      DeathTestAbort(::testing::internal::String::Format( \
+          "CHECK failed: File %s, line %d: %s", \
+          __FILE__, __LINE__, #expression)); \
+    } \
+  } while (::testing::internal::AlwaysFalse())
+
+// This macro is similar to GTEST_DEATH_TEST_CHECK_, but it is meant for
+// evaluating any system call that fulfills two conditions: it must return
+// -1 on failure, and set errno to EINTR when it is interrupted and
+// should be tried again.  The macro expands to a loop that repeatedly
+// evaluates the expression as long as it evaluates to -1 and sets
+// errno to EINTR.  If the expression evaluates to -1 but errno is
+// something other than EINTR, DeathTestAbort is called.
+# define GTEST_DEATH_TEST_CHECK_SYSCALL_(expression) \
+  do { \
+    int gtest_retval; \
+    do { \
+      gtest_retval = (expression); \
+    } while (gtest_retval == -1 && errno == EINTR); \
+    if (gtest_retval == -1) { \
+      DeathTestAbort(::testing::internal::String::Format( \
+          "CHECK failed: File %s, line %d: %s != -1", \
+          __FILE__, __LINE__, #expression)); \
+    } \
+  } while (::testing::internal::AlwaysFalse())
+
+// Returns the message describing the last system error in errno.
+String GetLastErrnoDescription() {
+    return String(errno == 0 ? "" : posix::StrError(errno));
+}
+
+// This is called from a death test parent process to read a failure
+// message from the death test child process and log it with the FATAL
+// severity. On Windows, the message is read from a pipe handle. On other
+// platforms, it is read from a file descriptor.
+static void FailFromInternalError(int fd) {
+  Message error;
+  char buffer[256];
+  int num_read;
+
+  do {
+    while ((num_read = posix::Read(fd, buffer, 255)) > 0) {
+      buffer[num_read] = '\0';
+      error << buffer;
+    }
+  } while (num_read == -1 && errno == EINTR);
+
+  if (num_read == 0) {
+    GTEST_LOG_(FATAL) << error.GetString();
+  } else {
+    const int last_error = errno;
+    GTEST_LOG_(FATAL) << "Error while reading death test internal: "
+                      << GetLastErrnoDescription() << " [" << last_error << "]";
+  }
+}
+
+// Death test constructor.  Increments the running death test count
+// for the current test.
+DeathTest::DeathTest() {
+  TestInfo* const info = GetUnitTestImpl()->current_test_info();
+  if (info == NULL) {
+    DeathTestAbort("Cannot run a death test outside of a TEST or "
+                   "TEST_F construct");
+  }
+}
+
+// Creates and returns a death test by dispatching to the current
+// death test factory.
+bool DeathTest::Create(const char* statement, const RE* regex,
+                       const char* file, int line, DeathTest** test) {
+  return GetUnitTestImpl()->death_test_factory()->Create(
+      statement, regex, file, line, test);
+}
+
+const char* DeathTest::LastMessage() {
+  return last_death_test_message_.c_str();
+}
+
+void DeathTest::set_last_death_test_message(const String& message) {
+  last_death_test_message_ = message;
+}
+
+String DeathTest::last_death_test_message_;
+
+// Provides cross platform implementation for some death functionality.
+class DeathTestImpl : public DeathTest {
+ protected:
+  DeathTestImpl(const char* a_statement, const RE* a_regex)
+      : statement_(a_statement),
+        regex_(a_regex),
+        spawned_(false),
+        status_(-1),
+        outcome_(IN_PROGRESS),
+        read_fd_(-1),
+        write_fd_(-1) {}
+
+  // read_fd_ is expected to be closed and cleared by a derived class.
+  ~DeathTestImpl() { GTEST_DEATH_TEST_CHECK_(read_fd_ == -1); }
+
+  void Abort(AbortReason reason);
+  virtual bool Passed(bool status_ok);
+
+  const char* statement() const { return statement_; }
+  const RE* regex() const { return regex_; }
+  bool spawned() const { return spawned_; }
+  void set_spawned(bool is_spawned) { spawned_ = is_spawned; }
+  int status() const { return status_; }
+  void set_status(int a_status) { status_ = a_status; }
+  DeathTestOutcome outcome() const { return outcome_; }
+  void set_outcome(DeathTestOutcome an_outcome) { outcome_ = an_outcome; }
+  int read_fd() const { return read_fd_; }
+  void set_read_fd(int fd) { read_fd_ = fd; }
+  int write_fd() const { return write_fd_; }
+  void set_write_fd(int fd) { write_fd_ = fd; }
+
+  // Called in the parent process only. Reads the result code of the death
+  // test child process via a pipe, interprets it to set the outcome_
+  // member, and closes read_fd_.  Outputs diagnostics and terminates in
+  // case of unexpected codes.
+  void ReadAndInterpretStatusByte();
+
+ private:
+  // The textual content of the code this object is testing.  This class
+  // doesn't own this string and should not attempt to delete it.
+  const char* const statement_;
+  // The regular expression which test output must match.  DeathTestImpl
+  // doesn't own this object and should not attempt to delete it.
+  const RE* const regex_;
+  // True if the death test child process has been successfully spawned.
+  bool spawned_;
+  // The exit status of the child process.
+  int status_;
+  // How the death test concluded.
+  DeathTestOutcome outcome_;
+  // Descriptor to the read end of the pipe to the child process.  It is
+  // always -1 in the child process.  The child keeps its write end of the
+  // pipe in write_fd_.
+  int read_fd_;
+  // Descriptor to the child's write end of the pipe to the parent process.
+  // It is always -1 in the parent process.  The parent keeps its end of the
+  // pipe in read_fd_.
+  int write_fd_;
+};
+
+// Called in the parent process only. Reads the result code of the death
+// test child process via a pipe, interprets it to set the outcome_
+// member, and closes read_fd_.  Outputs diagnostics and terminates in
+// case of unexpected codes.
+void DeathTestImpl::ReadAndInterpretStatusByte() {
+  char flag;
+  int bytes_read;
+
+  // The read() here blocks until data is available (signifying the
+  // failure of the death test) or until the pipe is closed (signifying
+  // its success), so it's okay to call this in the parent before
+  // the child process has exited.
+  do {
+    bytes_read = posix::Read(read_fd(), &flag, 1);
+  } while (bytes_read == -1 && errno == EINTR);
+
+  if (bytes_read == 0) {
+    set_outcome(DIED);
+  } else if (bytes_read == 1) {
+    switch (flag) {
+      case kDeathTestReturned:
+        set_outcome(RETURNED);
+        break;
+      case kDeathTestThrew:
+        set_outcome(THREW);
+        break;
+      case kDeathTestLived:
+        set_outcome(LIVED);
+        break;
+      case kDeathTestInternalError:
+        FailFromInternalError(read_fd());  // Does not return.
+        break;
+      default:
+        GTEST_LOG_(FATAL) << "Death test child process reported "
+                          << "unexpected status byte ("
+                          << static_cast<unsigned int>(flag) << ")";
+    }
+  } else {
+    GTEST_LOG_(FATAL) << "Read from death test child process failed: "
+                      << GetLastErrnoDescription();
+  }
+  GTEST_DEATH_TEST_CHECK_SYSCALL_(posix::Close(read_fd()));
+  set_read_fd(-1);
+}
+
+// Signals that the death test code which should have exited, didn't.
+// Should be called only in a death test child process.
+// Writes a status byte to the child's status file descriptor, then
+// calls _exit(1).
+void DeathTestImpl::Abort(AbortReason reason) {
+  // The parent process considers the death test to be a failure if
+  // it finds any data in our pipe.  So, here we write a single flag byte
+  // to the pipe, then exit.
+  const char status_ch =
+      reason == TEST_DID_NOT_DIE ? kDeathTestLived :
+      reason == TEST_THREW_EXCEPTION ? kDeathTestThrew : kDeathTestReturned;
+
+  GTEST_DEATH_TEST_CHECK_SYSCALL_(posix::Write(write_fd(), &status_ch, 1));
+  // We are leaking the descriptor here because on some platforms (i.e.,
+  // when built as Windows DLL), destructors of global objects will still
+  // run after calling _exit(). On such systems, write_fd_ will be
+  // indirectly closed from the destructor of UnitTestImpl, causing double
+  // close if it is also closed here. On debug configurations, double close
+  // may assert. As there are no in-process buffers to flush here, we are
+  // relying on the OS to close the descriptor after the process terminates
+  // when the destructors are not run.
+  _exit(1);  // Exits w/o any normal exit hooks (we were supposed to crash)
+}
+
+// Returns an indented copy of stderr output for a death test.
+// This makes distinguishing death test output lines from regular log lines
+// much easier.
+static ::std::string FormatDeathTestOutput(const ::std::string& output) {
+  ::std::string ret;
+  for (size_t at = 0; ; ) {
+    const size_t line_end = output.find('\n', at);
+    ret += "[  DEATH   ] ";
+    if (line_end == ::std::string::npos) {
+      ret += output.substr(at);
+      break;
+    }
+    ret += output.substr(at, line_end + 1 - at);
+    at = line_end + 1;
+  }
+  return ret;
+}
+
+// Assesses the success or failure of a death test, using both private
+// members which have previously been set, and one argument:
+//
+// Private data members:
+//   outcome:  An enumeration describing how the death test
+//             concluded: DIED, LIVED, THREW, or RETURNED.  The death test
+//             fails in the latter three cases.
+//   status:   The exit status of the child process. On *nix, it is in the
+//             in the format specified by wait(2). On Windows, this is the
+//             value supplied to the ExitProcess() API or a numeric code
+//             of the exception that terminated the program.
+//   regex:    A regular expression object to be applied to
+//             the test's captured standard error output; the death test
+//             fails if it does not match.
+//
+// Argument:
+//   status_ok: true if exit_status is acceptable in the context of
+//              this particular death test, which fails if it is false
+//
+// Returns true iff all of the above conditions are met.  Otherwise, the
+// first failing condition, in the order given above, is the one that is
+// reported. Also sets the last death test message string.
+bool DeathTestImpl::Passed(bool status_ok) {
+  if (!spawned())
+    return false;
+
+  const String error_message = GetCapturedStderr();
+
+  bool success = false;
+  Message buffer;
+
+  buffer << "Death test: " << statement() << "\n";
+  switch (outcome()) {
+    case LIVED:
+      buffer << "    Result: failed to die.\n"
+             << " Error msg:\n" << FormatDeathTestOutput(error_message);
+      break;
+    case THREW:
+      buffer << "    Result: threw an exception.\n"
+             << " Error msg:\n" << FormatDeathTestOutput(error_message);
+      break;
+    case RETURNED:
+      buffer << "    Result: illegal return in test statement.\n"
+             << " Error msg:\n" << FormatDeathTestOutput(error_message);
+      break;
+    case DIED:
+      if (status_ok) {
+        const bool matched = RE::PartialMatch(error_message.c_str(), *regex());
+        if (matched) {
+          success = true;
+        } else {
+          buffer << "    Result: died but not with expected error.\n"
+                 << "  Expected: " << regex()->pattern() << "\n"
+                 << "Actual msg:\n" << FormatDeathTestOutput(error_message);
+        }
+      } else {
+        buffer << "    Result: died but not with expected exit code:\n"
+               << "            " << ExitSummary(status()) << "\n"
+               << "Actual msg:\n" << FormatDeathTestOutput(error_message);
+      }
+      break;
+    case IN_PROGRESS:
+    default:
+      GTEST_LOG_(FATAL)
+          << "DeathTest::Passed somehow called before conclusion of test";
+  }
+
+  DeathTest::set_last_death_test_message(buffer.GetString());
+  return success;
+}
+
+# if GTEST_OS_WINDOWS
+// WindowsDeathTest implements death tests on Windows. Due to the
+// specifics of starting new processes on Windows, death tests there are
+// always threadsafe, and Google Test considers the
+// --gtest_death_test_style=fast setting to be equivalent to
+// --gtest_death_test_style=threadsafe there.
+//
+// A few implementation notes:  Like the Linux version, the Windows
+// implementation uses pipes for child-to-parent communication. But due to
+// the specifics of pipes on Windows, some extra steps are required:
+//
+// 1. The parent creates a communication pipe and stores handles to both
+//    ends of it.
+// 2. The parent starts the child and provides it with the information
+//    necessary to acquire the handle to the write end of the pipe.
+// 3. The child acquires the write end of the pipe and signals the parent
+//    using a Windows event.
+// 4. Now the parent can release the write end of the pipe on its side. If
+//    this is done before step 3, the object's reference count goes down to
+//    0 and it is destroyed, preventing the child from acquiring it. The
+//    parent now has to release it, or read operations on the read end of
+//    the pipe will not return when the child terminates.
+// 5. The parent reads child's output through the pipe (outcome code and
+//    any possible error messages) from the pipe, and its stderr and then
+//    determines whether to fail the test.
+//
+// Note: to distinguish Win32 API calls from the local method and function
+// calls, the former are explicitly resolved in the global namespace.
+//
+class WindowsDeathTest : public DeathTestImpl {
+ public:
+  WindowsDeathTest(const char* a_statement,
+                   const RE* a_regex,
+                   const char* file,
+                   int line)
+      : DeathTestImpl(a_statement, a_regex), file_(file), line_(line) {}
+
+  // All of these virtual functions are inherited from DeathTest.
+  virtual int Wait();
+  virtual TestRole AssumeRole();
+
+ private:
+  // The name of the file in which the death test is located.
+  const char* const file_;
+  // The line number on which the death test is located.
+  const int line_;
+  // Handle to the write end of the pipe to the child process.
+  AutoHandle write_handle_;
+  // Child process handle.
+  AutoHandle child_handle_;
+  // Event the child process uses to signal the parent that it has
+  // acquired the handle to the write end of the pipe. After seeing this
+  // event the parent can release its own handles to make sure its
+  // ReadFile() calls return when the child terminates.
+  AutoHandle event_handle_;
+};
+
+// Waits for the child in a death test to exit, returning its exit
+// status, or 0 if no child process exists.  As a side effect, sets the
+// outcome data member.
+int WindowsDeathTest::Wait() {
+  if (!spawned())
+    return 0;
+
+  // Wait until the child either signals that it has acquired the write end
+  // of the pipe or it dies.
+  const HANDLE wait_handles[2] = { child_handle_.Get(), event_handle_.Get() };
+  switch (::WaitForMultipleObjects(2,
+                                   wait_handles,
+                                   FALSE,  // Waits for any of the handles.
+                                   INFINITE)) {
+    case WAIT_OBJECT_0:
+    case WAIT_OBJECT_0 + 1:
+      break;
+    default:
+      GTEST_DEATH_TEST_CHECK_(false);  // Should not get here.
+  }
+
+  // The child has acquired the write end of the pipe or exited.
+  // We release the handle on our side and continue.
+  write_handle_.Reset();
+  event_handle_.Reset();
+
+  ReadAndInterpretStatusByte();
+
+  // Waits for the child process to exit if it haven't already. This
+  // returns immediately if the child has already exited, regardless of
+  // whether previous calls to WaitForMultipleObjects synchronized on this
+  // handle or not.
+  GTEST_DEATH_TEST_CHECK_(
+      WAIT_OBJECT_0 == ::WaitForSingleObject(child_handle_.Get(),
+                                             INFINITE));
+  DWORD status_code;
+  GTEST_DEATH_TEST_CHECK_(
+      ::GetExitCodeProcess(child_handle_.Get(), &status_code) != FALSE);
+  child_handle_.Reset();
+  set_status(static_cast<int>(status_code));
+  return status();
+}
+
+// The AssumeRole process for a Windows death test.  It creates a child
+// process with the same executable as the current process to run the
+// death test.  The child process is given the --gtest_filter and
+// --gtest_internal_run_death_test flags such that it knows to run the
+// current death test only.
+DeathTest::TestRole WindowsDeathTest::AssumeRole() {
+  const UnitTestImpl* const impl = GetUnitTestImpl();
+  const InternalRunDeathTestFlag* const flag =
+      impl->internal_run_death_test_flag();
+  const TestInfo* const info = impl->current_test_info();
+  const int death_test_index = info->result()->death_test_count();
+
+  if (flag != NULL) {
+    // ParseInternalRunDeathTestFlag() has performed all the necessary
+    // processing.
+    set_write_fd(flag->write_fd());
+    return EXECUTE_TEST;
+  }
+
+  // WindowsDeathTest uses an anonymous pipe to communicate results of
+  // a death test.
+  SECURITY_ATTRIBUTES handles_are_inheritable = {
+    sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+  HANDLE read_handle, write_handle;
+  GTEST_DEATH_TEST_CHECK_(
+      ::CreatePipe(&read_handle, &write_handle, &handles_are_inheritable,
+                   0)  // Default buffer size.
+      != FALSE);
+  set_read_fd(::_open_osfhandle(reinterpret_cast<intptr_t>(read_handle),
+                                O_RDONLY));
+  write_handle_.Reset(write_handle);
+  event_handle_.Reset(::CreateEvent(
+      &handles_are_inheritable,
+      TRUE,    // The event will automatically reset to non-signaled state.
+      FALSE,   // The initial state is non-signalled.
+      NULL));  // The even is unnamed.
+  GTEST_DEATH_TEST_CHECK_(event_handle_.Get() != NULL);
+  const String filter_flag = String::Format("--%s%s=%s.%s",
+                                            GTEST_FLAG_PREFIX_, kFilterFlag,
+                                            info->test_case_name(),
+                                            info->name());
+  const String internal_flag = String::Format(
+    "--%s%s=%s|%d|%d|%u|%Iu|%Iu",
+      GTEST_FLAG_PREFIX_,
+      kInternalRunDeathTestFlag,
+      file_, line_,
+      death_test_index,
+      static_cast<unsigned int>(::GetCurrentProcessId()),
+      // size_t has the same with as pointers on both 32-bit and 64-bit
+      // Windows platforms.
+      // See http://msdn.microsoft.com/en-us/library/tcxf1dw6.aspx.
+      reinterpret_cast<size_t>(write_handle),
+      reinterpret_cast<size_t>(event_handle_.Get()));
+
+  char executable_path[_MAX_PATH + 1];  // NOLINT
+  GTEST_DEATH_TEST_CHECK_(
+      _MAX_PATH + 1 != ::GetModuleFileNameA(NULL,
+                                            executable_path,
+                                            _MAX_PATH));
+
+  String command_line = String::Format("%s %s \"%s\"",
+                                       ::GetCommandLineA(),
+                                       filter_flag.c_str(),
+                                       internal_flag.c_str());
+
+  DeathTest::set_last_death_test_message("");
+
+  CaptureStderr();
+  // Flush the log buffers since the log streams are shared with the child.
+  FlushInfoLog();
+
+  // The child process will share the standard handles with the parent.
+  STARTUPINFOA startup_info;
+  memset(&startup_info, 0, sizeof(STARTUPINFO));
+  startup_info.dwFlags = STARTF_USESTDHANDLES;
+  startup_info.hStdInput = ::GetStdHandle(STD_INPUT_HANDLE);
+  startup_info.hStdOutput = ::GetStdHandle(STD_OUTPUT_HANDLE);
+  startup_info.hStdError = ::GetStdHandle(STD_ERROR_HANDLE);
+
+  PROCESS_INFORMATION process_info;
+  GTEST_DEATH_TEST_CHECK_(::CreateProcessA(
+      executable_path,
+      const_cast<char*>(command_line.c_str()),
+      NULL,   // Retuned process handle is not inheritable.
+      NULL,   // Retuned thread handle is not inheritable.
+      TRUE,   // Child inherits all inheritable handles (for write_handle_).
+      0x0,    // Default creation flags.
+      NULL,   // Inherit the parent's environment.
+      UnitTest::GetInstance()->original_working_dir(),
+      &startup_info,
+      &process_info) != FALSE);
+  child_handle_.Reset(process_info.hProcess);
+  ::CloseHandle(process_info.hThread);
+  set_spawned(true);
+  return OVERSEE_TEST;
+}
+# else  // We are not on Windows.
+
+// ForkingDeathTest provides implementations for most of the abstract
+// methods of the DeathTest interface.  Only the AssumeRole method is
+// left undefined.
+class ForkingDeathTest : public DeathTestImpl {
+ public:
+  ForkingDeathTest(const char* statement, const RE* regex);
+
+  // All of these virtual functions are inherited from DeathTest.
+  virtual int Wait();
+
+ protected:
+  void set_child_pid(pid_t child_pid) { child_pid_ = child_pid; }
+
+ private:
+  // PID of child process during death test; 0 in the child process itself.
+  pid_t child_pid_;
+};
+
+// Constructs a ForkingDeathTest.
+ForkingDeathTest::ForkingDeathTest(const char* a_statement, const RE* a_regex)
+    : DeathTestImpl(a_statement, a_regex),
+      child_pid_(-1) {}
+
+// Waits for the child in a death test to exit, returning its exit
+// status, or 0 if no child process exists.  As a side effect, sets the
+// outcome data member.
+int ForkingDeathTest::Wait() {
+  if (!spawned())
+    return 0;
+
+  ReadAndInterpretStatusByte();
+
+  int status_value;
+  GTEST_DEATH_TEST_CHECK_SYSCALL_(waitpid(child_pid_, &status_value, 0));
+  set_status(status_value);
+  return status_value;
+}
+
+// A concrete death test class that forks, then immediately runs the test
+// in the child process.
+class NoExecDeathTest : public ForkingDeathTest {
+ public:
+  NoExecDeathTest(const char* a_statement, const RE* a_regex) :
+      ForkingDeathTest(a_statement, a_regex) { }
+  virtual TestRole AssumeRole();
+};
+
+// The AssumeRole process for a fork-and-run death test.  It implements a
+// straightforward fork, with a simple pipe to transmit the status byte.
+DeathTest::TestRole NoExecDeathTest::AssumeRole() {
+  const size_t thread_count = GetThreadCount();
+  if (thread_count != 1) {
+    GTEST_LOG_(WARNING) << DeathTestThreadWarning(thread_count);
+  }
+
+  int pipe_fd[2];
+  GTEST_DEATH_TEST_CHECK_(pipe(pipe_fd) != -1);
+
+  DeathTest::set_last_death_test_message("");
+  CaptureStderr();
+  // When we fork the process below, the log file buffers are copied, but the
+  // file descriptors are shared.  We flush all log files here so that closing
+  // the file descriptors in the child process doesn't throw off the
+  // synchronization between descriptors and buffers in the parent process.
+  // This is as close to the fork as possible to avoid a race condition in case
+  // there are multiple threads running before the death test, and another
+  // thread writes to the log file.
+  FlushInfoLog();
+
+  const pid_t child_pid = fork();
+  GTEST_DEATH_TEST_CHECK_(child_pid != -1);
+  set_child_pid(child_pid);
+  if (child_pid == 0) {
+    GTEST_DEATH_TEST_CHECK_SYSCALL_(close(pipe_fd[0]));
+    set_write_fd(pipe_fd[1]);
+    // Redirects all logging to stderr in the child process to prevent
+    // concurrent writes to the log files.  We capture stderr in the parent
+    // process and append the child process' output to a log.
+    LogToStderr();
+    // Event forwarding to the listeners of event listener API mush be shut
+    // down in death test subprocesses.
+    GetUnitTestImpl()->listeners()->SuppressEventForwarding();
+    return EXECUTE_TEST;
+  } else {
+    GTEST_DEATH_TEST_CHECK_SYSCALL_(close(pipe_fd[1]));
+    set_read_fd(pipe_fd[0]);
+    set_spawned(true);
+    return OVERSEE_TEST;
+  }
+}
+
+// A concrete death test class that forks and re-executes the main
+// program from the beginning, with command-line flags set that cause
+// only this specific death test to be run.
+class ExecDeathTest : public ForkingDeathTest {
+ public:
+  ExecDeathTest(const char* a_statement, const RE* a_regex,
+                const char* file, int line) :
+      ForkingDeathTest(a_statement, a_regex), file_(file), line_(line) { }
+  virtual TestRole AssumeRole();
+ private:
+  // The name of the file in which the death test is located.
+  const char* const file_;
+  // The line number on which the death test is located.
+  const int line_;
+};
+
+// Utility class for accumulating command-line arguments.
+class Arguments {
+ public:
+  Arguments() {
+    args_.push_back(NULL);
+  }
+
+  ~Arguments() {
+    for (std::vector<char*>::iterator i = args_.begin(); i != args_.end();
+         ++i) {
+      free(*i);
+    }
+  }
+  void AddArgument(const char* argument) {
+    args_.insert(args_.end() - 1, posix::StrDup(argument));
+  }
+
+  template <typename Str>
+  void AddArguments(const ::std::vector<Str>& arguments) {
+    for (typename ::std::vector<Str>::const_iterator i = arguments.begin();
+         i != arguments.end();
+         ++i) {
+      args_.insert(args_.end() - 1, posix::StrDup(i->c_str()));
+    }
+  }
+  char* const* Argv() {
+    return &args_[0];
+  }
+ private:
+  std::vector<char*> args_;
+};
+
+// A struct that encompasses the arguments to the child process of a
+// threadsafe-style death test process.
+struct ExecDeathTestArgs {
+  char* const* argv;  // Command-line arguments for the child's call to exec
+  int close_fd;       // File descriptor to close; the read end of a pipe
+};
+
+#  if GTEST_OS_MAC
+inline char** GetEnviron() {
+  // When Google Test is built as a framework on MacOS X, the environ variable
+  // is unavailable. Apple's documentation (man environ) recommends using
+  // _NSGetEnviron() instead.
+  return *_NSGetEnviron();
+}
+#  else
+// Some POSIX platforms expect you to declare environ. extern "C" makes
+// it reside in the global namespace.
+extern "C" char** environ;
+inline char** GetEnviron() { return environ; }
+#  endif  // GTEST_OS_MAC
+
+// The main function for a threadsafe-style death test child process.
+// This function is called in a clone()-ed process and thus must avoid
+// any potentially unsafe operations like malloc or libc functions.
+static int ExecDeathTestChildMain(void* child_arg) {
+  ExecDeathTestArgs* const args = static_cast<ExecDeathTestArgs*>(child_arg);
+  GTEST_DEATH_TEST_CHECK_SYSCALL_(close(args->close_fd));
+
+  // We need to execute the test program in the same environment where
+  // it was originally invoked.  Therefore we change to the original
+  // working directory first.
+  const char* const original_dir =
+      UnitTest::GetInstance()->original_working_dir();
+  // We can safely call chdir() as it's a direct system call.
+  if (chdir(original_dir) != 0) {
+    DeathTestAbort(String::Format("chdir(\"%s\") failed: %s",
+                                  original_dir,
+                                  GetLastErrnoDescription().c_str()));
+    return EXIT_FAILURE;
+  }
+
+  // We can safely call execve() as it's a direct system call.  We
+  // cannot use execvp() as it's a libc function and thus potentially
+  // unsafe.  Since execve() doesn't search the PATH, the user must
+  // invoke the test program via a valid path that contains at least
+  // one path separator.
+  execve(args->argv[0], args->argv, GetEnviron());
+  DeathTestAbort(String::Format("execve(%s, ...) in %s failed: %s",
+                                args->argv[0],
+                                original_dir,
+                                GetLastErrnoDescription().c_str()));
+  return EXIT_FAILURE;
+}
+
+// Two utility routines that together determine the direction the stack
+// grows.
+// This could be accomplished more elegantly by a single recursive
+// function, but we want to guard against the unlikely possibility of
+// a smart compiler optimizing the recursion away.
+//
+// GTEST_NO_INLINE_ is required to prevent GCC 4.6 from inlining
+// StackLowerThanAddress into StackGrowsDown, which then doesn't give
+// correct answer.
+bool StackLowerThanAddress(const void* ptr) GTEST_NO_INLINE_;
+bool StackLowerThanAddress(const void* ptr) {
+  int dummy;
+  return &dummy < ptr;
+}
+
+bool StackGrowsDown() {
+  int dummy;
+  return StackLowerThanAddress(&dummy);
+}
+
+// A threadsafe implementation of fork(2) for threadsafe-style death tests
+// that uses clone(2).  It dies with an error message if anything goes
+// wrong.
+static pid_t ExecDeathTestFork(char* const* argv, int close_fd) {
+  ExecDeathTestArgs args = { argv, close_fd };
+  pid_t child_pid = -1;
+
+#  if GTEST_HAS_CLONE
+  const bool use_fork = GTEST_FLAG(death_test_use_fork);
+
+  if (!use_fork) {
+    static const bool stack_grows_down = StackGrowsDown();
+    const size_t stack_size = getpagesize();
+    // MMAP_ANONYMOUS is not defined on Mac, so we use MAP_ANON instead.
+    void* const stack = mmap(NULL, stack_size, PROT_READ | PROT_WRITE,
+                             MAP_ANON | MAP_PRIVATE, -1, 0);
+    GTEST_DEATH_TEST_CHECK_(stack != MAP_FAILED);
+    void* const stack_top =
+        static_cast<char*>(stack) + (stack_grows_down ? stack_size : 0);
+
+    child_pid = clone(&ExecDeathTestChildMain, stack_top, SIGCHLD, &args);
+
+    GTEST_DEATH_TEST_CHECK_(munmap(stack, stack_size) != -1);
+  }
+#  else
+  const bool use_fork = true;
+#  endif  // GTEST_HAS_CLONE
+
+  if (use_fork && (child_pid = fork()) == 0) {
+      ExecDeathTestChildMain(&args);
+      _exit(0);
+  }
+
+  GTEST_DEATH_TEST_CHECK_(child_pid != -1);
+  return child_pid;
+}
+
+// The AssumeRole process for a fork-and-exec death test.  It re-executes the
+// main program from the beginning, setting the --gtest_filter
+// and --gtest_internal_run_death_test flags to cause only the current
+// death test to be re-run.
+DeathTest::TestRole ExecDeathTest::AssumeRole() {
+  const UnitTestImpl* const impl = GetUnitTestImpl();
+  const InternalRunDeathTestFlag* const flag =
+      impl->internal_run_death_test_flag();
+  const TestInfo* const info = impl->current_test_info();
+  const int death_test_index = info->result()->death_test_count();
+
+  if (flag != NULL) {
+    set_write_fd(flag->write_fd());
+    return EXECUTE_TEST;
+  }
+
+  int pipe_fd[2];
+  GTEST_DEATH_TEST_CHECK_(pipe(pipe_fd) != -1);
+  // Clear the close-on-exec flag on the write end of the pipe, lest
+  // it be closed when the child process does an exec:
+  GTEST_DEATH_TEST_CHECK_(fcntl(pipe_fd[1], F_SETFD, 0) != -1);
+
+  const String filter_flag =
+      String::Format("--%s%s=%s.%s",
+                     GTEST_FLAG_PREFIX_, kFilterFlag,
+                     info->test_case_name(), info->name());
+  const String internal_flag =
+      String::Format("--%s%s=%s|%d|%d|%d",
+                     GTEST_FLAG_PREFIX_, kInternalRunDeathTestFlag,
+                     file_, line_, death_test_index, pipe_fd[1]);
+  Arguments args;
+  args.AddArguments(GetArgvs());
+  args.AddArgument(filter_flag.c_str());
+  args.AddArgument(internal_flag.c_str());
+
+  DeathTest::set_last_death_test_message("");
+
+  CaptureStderr();
+  // See the comment in NoExecDeathTest::AssumeRole for why the next line
+  // is necessary.
+  FlushInfoLog();
+
+  const pid_t child_pid = ExecDeathTestFork(args.Argv(), pipe_fd[0]);
+  GTEST_DEATH_TEST_CHECK_SYSCALL_(close(pipe_fd[1]));
+  set_child_pid(child_pid);
+  set_read_fd(pipe_fd[0]);
+  set_spawned(true);
+  return OVERSEE_TEST;
+}
+
+# endif  // !GTEST_OS_WINDOWS
+
+// Creates a concrete DeathTest-derived class that depends on the
+// --gtest_death_test_style flag, and sets the pointer pointed to
+// by the "test" argument to its address.  If the test should be
+// skipped, sets that pointer to NULL.  Returns true, unless the
+// flag is set to an invalid value.
+bool DefaultDeathTestFactory::Create(const char* statement, const RE* regex,
+                                     const char* file, int line,
+                                     DeathTest** test) {
+  UnitTestImpl* const impl = GetUnitTestImpl();
+  const InternalRunDeathTestFlag* const flag =
+      impl->internal_run_death_test_flag();
+  const int death_test_index = impl->current_test_info()
+      ->increment_death_test_count();
+
+  if (flag != NULL) {
+    if (death_test_index > flag->index()) {
+      DeathTest::set_last_death_test_message(String::Format(
+          "Death test count (%d) somehow exceeded expected maximum (%d)",
+          death_test_index, flag->index()));
+      return false;
+    }
+
+    if (!(flag->file() == file && flag->line() == line &&
+          flag->index() == death_test_index)) {
+      *test = NULL;
+      return true;
+    }
+  }
+
+# if GTEST_OS_WINDOWS
+
+  if (GTEST_FLAG(death_test_style) == "threadsafe" ||
+      GTEST_FLAG(death_test_style) == "fast") {
+    *test = new WindowsDeathTest(statement, regex, file, line);
+  }
+
+# else
+
+  if (GTEST_FLAG(death_test_style) == "threadsafe") {
+    *test = new ExecDeathTest(statement, regex, file, line);
+  } else if (GTEST_FLAG(death_test_style) == "fast") {
+    *test = new NoExecDeathTest(statement, regex);
+  }
+
+# endif  // GTEST_OS_WINDOWS
+
+  else {  // NOLINT - this is more readable than unbalanced brackets inside #if.
+    DeathTest::set_last_death_test_message(String::Format(
+        "Unknown death test style \"%s\" encountered",
+        GTEST_FLAG(death_test_style).c_str()));
+    return false;
+  }
+
+  return true;
+}
+
+// Splits a given string on a given delimiter, populating a given
+// vector with the fields.  GTEST_HAS_DEATH_TEST implies that we have
+// ::std::string, so we can use it here.
+static void SplitString(const ::std::string& str, char delimiter,
+                        ::std::vector< ::std::string>* dest) {
+  ::std::vector< ::std::string> parsed;
+  ::std::string::size_type pos = 0;
+  while (::testing::internal::AlwaysTrue()) {
+    const ::std::string::size_type colon = str.find(delimiter, pos);
+    if (colon == ::std::string::npos) {
+      parsed.push_back(str.substr(pos));
+      break;
+    } else {
+      parsed.push_back(str.substr(pos, colon - pos));
+      pos = colon + 1;
+    }
+  }
+  dest->swap(parsed);
+}
+
+# if GTEST_OS_WINDOWS
+// Recreates the pipe and event handles from the provided parameters,
+// signals the event, and returns a file descriptor wrapped around the pipe
+// handle. This function is called in the child process only.
+int GetStatusFileDescriptor(unsigned int parent_process_id,
+                            size_t write_handle_as_size_t,
+                            size_t event_handle_as_size_t) {
+  AutoHandle parent_process_handle(::OpenProcess(PROCESS_DUP_HANDLE,
+                                                   FALSE,  // Non-inheritable.
+                                                   parent_process_id));
+  if (parent_process_handle.Get() == INVALID_HANDLE_VALUE) {
+    DeathTestAbort(String::Format("Unable to open parent process %u",
+                                  parent_process_id));
+  }
+
+  // TODO(vladl@google.com): Replace the following check with a
+  // compile-time assertion when available.
+  GTEST_CHECK_(sizeof(HANDLE) <= sizeof(size_t));
+
+  const HANDLE write_handle =
+      reinterpret_cast<HANDLE>(write_handle_as_size_t);
+  HANDLE dup_write_handle;
+
+  // The newly initialized handle is accessible only in in the parent
+  // process. To obtain one accessible within the child, we need to use
+  // DuplicateHandle.
+  if (!::DuplicateHandle(parent_process_handle.Get(), write_handle,
+                         ::GetCurrentProcess(), &dup_write_handle,
+                         0x0,    // Requested privileges ignored since
+                                 // DUPLICATE_SAME_ACCESS is used.
+                         FALSE,  // Request non-inheritable handler.
+                         DUPLICATE_SAME_ACCESS)) {
+    DeathTestAbort(String::Format(
+        "Unable to duplicate the pipe handle %Iu from the parent process %u",
+        write_handle_as_size_t, parent_process_id));
+  }
+
+  const HANDLE event_handle = reinterpret_cast<HANDLE>(event_handle_as_size_t);
+  HANDLE dup_event_handle;
+
+  if (!::DuplicateHandle(parent_process_handle.Get(), event_handle,
+                         ::GetCurrentProcess(), &dup_event_handle,
+                         0x0,
+                         FALSE,
+                         DUPLICATE_SAME_ACCESS)) {
+    DeathTestAbort(String::Format(
+        "Unable to duplicate the event handle %Iu from the parent process %u",
+        event_handle_as_size_t, parent_process_id));
+  }
+
+  const int write_fd =
+      ::_open_osfhandle(reinterpret_cast<intptr_t>(dup_write_handle), O_APPEND);
+  if (write_fd == -1) {
+    DeathTestAbort(String::Format(
+        "Unable to convert pipe handle %Iu to a file descriptor",
+        write_handle_as_size_t));
+  }
+
+  // Signals the parent that the write end of the pipe has been acquired
+  // so the parent can release its own write end.
+  ::SetEvent(dup_event_handle);
+
+  return write_fd;
+}
+# endif  // GTEST_OS_WINDOWS
+
+// Returns a newly created InternalRunDeathTestFlag object with fields
+// initialized from the GTEST_FLAG(internal_run_death_test) flag if
+// the flag is specified; otherwise returns NULL.
+InternalRunDeathTestFlag* ParseInternalRunDeathTestFlag() {
+  if (GTEST_FLAG(internal_run_death_test) == "") return NULL;
+
+  // GTEST_HAS_DEATH_TEST implies that we have ::std::string, so we
+  // can use it here.
+  int line = -1;
+  int index = -1;
+  ::std::vector< ::std::string> fields;
+  SplitString(GTEST_FLAG(internal_run_death_test).c_str(), '|', &fields);
+  int write_fd = -1;
+
+# if GTEST_OS_WINDOWS
+
+  unsigned int parent_process_id = 0;
+  size_t write_handle_as_size_t = 0;
+  size_t event_handle_as_size_t = 0;
+
+  if (fields.size() != 6
+      || !ParseNaturalNumber(fields[1], &line)
+      || !ParseNaturalNumber(fields[2], &index)
+      || !ParseNaturalNumber(fields[3], &parent_process_id)
+      || !ParseNaturalNumber(fields[4], &write_handle_as_size_t)
+      || !ParseNaturalNumber(fields[5], &event_handle_as_size_t)) {
+    DeathTestAbort(String::Format(
+        "Bad --gtest_internal_run_death_test flag: %s",
+        GTEST_FLAG(internal_run_death_test).c_str()));
+  }
+  write_fd = GetStatusFileDescriptor(parent_process_id,
+                                     write_handle_as_size_t,
+                                     event_handle_as_size_t);
+# else
+
+  if (fields.size() != 4
+      || !ParseNaturalNumber(fields[1], &line)
+      || !ParseNaturalNumber(fields[2], &index)
+      || !ParseNaturalNumber(fields[3], &write_fd)) {
+    DeathTestAbort(String::Format(
+        "Bad --gtest_internal_run_death_test flag: %s",
+        GTEST_FLAG(internal_run_death_test).c_str()));
+  }
+
+# endif  // GTEST_OS_WINDOWS
+
+  return new InternalRunDeathTestFlag(fields[0], line, index, write_fd);
+}
+
+}  // namespace internal
+
+#endif  // GTEST_HAS_DEATH_TEST
+
+}  // namespace testing
+// Copyright 2008, Google Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Authors: keith.ray@gmail.com (Keith Ray)
+
+
+#include <stdlib.h>
+
+#if GTEST_OS_WINDOWS_MOBILE
+# include <windows.h>
+#elif GTEST_OS_WINDOWS
+# include <direct.h>
+# include <io.h>
+#elif GTEST_OS_SYMBIAN || GTEST_OS_NACL
+// Symbian OpenC and NaCl have PATH_MAX in sys/syslimits.h
+# include <sys/syslimits.h>
+#else
+# include <limits.h>
+# include <climits>  // Some Linux distributions define PATH_MAX here.
+#endif  // GTEST_OS_WINDOWS_MOBILE
+
+#if GTEST_OS_WINDOWS
+# define GTEST_PATH_MAX_ _MAX_PATH
+#elif defined(PATH_MAX)
+# define GTEST_PATH_MAX_ PATH_MAX
+#elif defined(_XOPEN_PATH_MAX)
+# define GTEST_PATH_MAX_ _XOPEN_PATH_MAX
+#else
+# define GTEST_PATH_MAX_ _POSIX_PATH_MAX
+#endif  // GTEST_OS_WINDOWS
+
+
+namespace testing {
+namespace internal {
+
+#if GTEST_OS_WINDOWS
+// On Windows, '\\' is the standard path separator, but many tools and the
+// Windows API also accept '/' as an alternate path separator. Unless otherwise
+// noted, a file path can contain either kind of path separators, or a mixture
+// of them.
+const char kPathSeparator = '\\';
+const char kAlternatePathSeparator = '/';
+const char kPathSeparatorString[] = "\\";
+const char kAlternatePathSeparatorString[] = "/";
+# if GTEST_OS_WINDOWS_MOBILE
+// Windows CE doesn't have a current directory. You should not use
+// the current directory in tests on Windows CE, but this at least
+// provides a reasonable fallback.
+const char kCurrentDirectoryString[] = "\\";
+// Windows CE doesn't define INVALID_FILE_ATTRIBUTES
+const DWORD kInvalidFileAttributes = 0xffffffff;
+# else
+const char kCurrentDirectoryString[] = ".\\";
+# endif  // GTEST_OS_WINDOWS_MOBILE
+#else
+const char kPathSeparator = '/';
+const char kPathSeparatorString[] = "/";
+const char kCurrentDirectoryString[] = "./";
+#endif  // GTEST_OS_WINDOWS
+
+// Returns whether the given character is a valid path separator.
+static bool IsPathSeparator(char c) {
+#if GTEST_HAS_ALT_PATH_SEP_
+  return (c == kPathSeparator) || (c == kAlternatePathSeparator);
+#else
+  return c == kPathSeparator;
+#endif
+}
+
+// Returns the current working directory, or "" if unsuccessful.
+FilePath FilePath::GetCurrentDir() {
+#if GTEST_OS_WINDOWS_MOBILE
+  // Windows CE doesn't have a current directory, so we just return
+  // something reasonable.
+  return FilePath(kCurrentDirectoryString);
+#elif GTEST_OS_WINDOWS
+  char cwd[GTEST_PATH_MAX_ + 1] = { '\0' };
+  return FilePath(_getcwd(cwd, sizeof(cwd)) == NULL ? "" : cwd);
+#else
+  char cwd[GTEST_PATH_MAX_ + 1] = { '\0' };
+  return FilePath(getcwd(cwd, sizeof(cwd)) == NULL ? "" : cwd);
+#endif  // GTEST_OS_WINDOWS_MOBILE
+}
+
+// Returns a copy of the FilePath with the case-insensitive extension removed.
+// Example: FilePath("dir/file.exe").RemoveExtension("EXE") returns
+// FilePath("dir/file"). If a case-insensitive extension is not
+// found, returns a copy of the original FilePath.
+FilePath FilePath::RemoveExtension(const char* extension) const {
+  String dot_extension(String::Format(".%s", extension));
+  if (pathname_.EndsWithCaseInsensitive(dot_extension.c_str())) {
+    return FilePath(String(pathname_.c_str(), pathname_.length() - 4));
+  }
+  return *this;
+}
+
+// Returns a pointer to the last occurence of a valid path separator in
+// the FilePath. On Windows, for example, both '/' and '\' are valid path
+// separators. Returns NULL if no path separator was found.
+const char* FilePath::FindLastPathSeparator() const {
+  const char* const last_sep = strrchr(c_str(), kPathSeparator);
+#if GTEST_HAS_ALT_PATH_SEP_
+  const char* const last_alt_sep = strrchr(c_str(), kAlternatePathSeparator);
+  // Comparing two pointers of which only one is NULL is undefined.
+  if (last_alt_sep != NULL &&
+      (last_sep == NULL || last_alt_sep > last_sep)) {
+    return last_alt_sep;
+  }
+#endif
+  return last_sep;
+}
+
+// Returns a copy of the FilePath with the directory part removed.
+// Example: FilePath("path/to/file").RemoveDirectoryName() returns
+// FilePath("file"). If there is no directory part ("just_a_file"), it returns
+// the FilePath unmodified. If there is no file part ("just_a_dir/") it
+// returns an empty FilePath ("").
+// On Windows platform, '\' is the path separator, otherwise it is '/'.
+FilePath FilePath::RemoveDirectoryName() const {
+  const char* const last_sep = FindLastPathSeparator();
+  return last_sep ? FilePath(String(last_sep + 1)) : *this;
+}
+
+// RemoveFileName returns the directory path with the filename removed.
+// Example: FilePath("path/to/file").RemoveFileName() returns "path/to/".
+// If the FilePath is "a_file" or "/a_file", RemoveFileName returns
+// FilePath("./") or, on Windows, FilePath(".\\"). If the filepath does
+// not have a file, like "just/a/dir/", it returns the FilePath unmodified.
+// On Windows platform, '\' is the path separator, otherwise it is '/'.
+FilePath FilePath::RemoveFileName() const {
+  const char* const last_sep = FindLastPathSeparator();
+  String dir;
+  if (last_sep) {
+    dir = String(c_str(), last_sep + 1 - c_str());
+  } else {
+    dir = kCurrentDirectoryString;
+  }
+  return FilePath(dir);
+}
+
+// Helper functions for naming files in a directory for xml output.
+
+// Given directory = "dir", base_name = "test", number = 0,
+// extension = "xml", returns "dir/test.xml". If number is greater
+// than zero (e.g., 12), returns "dir/test_12.xml".
+// On Windows platform, uses \ as the separator rather than /.
+FilePath FilePath::MakeFileName(const FilePath& directory,
+                                const FilePath& base_name,
+                                int number,
+                                const char* extension) {
+  String file;
+  if (number == 0) {
+    file = String::Format("%s.%s", base_name.c_str(), extension);
+  } else {
+    file = String::Format("%s_%d.%s", base_name.c_str(), number, extension);
+  }
+  return ConcatPaths(directory, FilePath(file));
+}
+
+// Given directory = "dir", relative_path = "test.xml", returns "dir/test.xml".
+// On Windows, uses \ as the separator rather than /.
+FilePath FilePath::ConcatPaths(const FilePath& directory,
+                               const FilePath& relative_path) {
+  if (directory.IsEmpty())
+    return relative_path;
+  const FilePath dir(directory.RemoveTrailingPathSeparator());
+  return FilePath(String::Format("%s%c%s", dir.c_str(), kPathSeparator,
+                                 relative_path.c_str()));
+}
+
+// Returns true if pathname describes something findable in the file-system,
+// either a file, directory, or whatever.
+bool FilePath::FileOrDirectoryExists() const {
+#if GTEST_OS_WINDOWS_MOBILE
+  LPCWSTR unicode = String::AnsiToUtf16(pathname_.c_str());
+  const DWORD attributes = GetFileAttributes(unicode);
+  delete [] unicode;
+  return attributes != kInvalidFileAttributes;
+#else
+  posix::StatStruct file_stat;
+  return posix::Stat(pathname_.c_str(), &file_stat) == 0;
+#endif  // GTEST_OS_WINDOWS_MOBILE
+}
+
+// Returns true if pathname describes a directory in the file-system
+// that exists.
+bool FilePath::DirectoryExists() const {
+  bool result = false;
+#if GTEST_OS_WINDOWS
+  // Don't strip off trailing separator if path is a root directory on
+  // Windows (like "C:\\").
+  const FilePath& path(IsRootDirectory() ? *this :
+                                           RemoveTrailingPathSeparator());
+#else
+  const FilePath& path(*this);
+#endif
+
+#if GTEST_OS_WINDOWS_MOBILE
+  LPCWSTR unicode = String::AnsiToUtf16(path.c_str());
+  const DWORD attributes = GetFileAttributes(unicode);
+  delete [] unicode;
+  if ((attributes != kInvalidFileAttributes) &&
+      (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+    result = true;
+  }
+#else
+  posix::StatStruct file_stat;
+  result = posix::Stat(path.c_str(), &file_stat) == 0 &&
+      posix::IsDir(file_stat);
+#endif  // GTEST_OS_WINDOWS_MOBILE
+
+  return result;
+}
+
+// Returns true if pathname describes a root directory. (Windows has one
+// root directory per disk drive.)
+bool FilePath::IsRootDirectory() const {
+#if GTEST_OS_WINDOWS
+  // TODO(wan@google.com): on Windows a network share like
+  // \\server\share can be a root directory, although it cannot be the
+  // current directory.  Handle this properly.
+  return pathname_.length() == 3 && IsAbsolutePath();
+#else
+  return pathname_.length() == 1 && IsPathSeparator(pathname_.c_str()[0]);
+#endif
+}
+
+// Returns true if pathname describes an absolute path.
+bool FilePath::IsAbsolutePath() const {
+  const char* const name = pathname_.c_str();
+#if GTEST_OS_WINDOWS
+  return pathname_.length() >= 3 &&
+     ((name[0] >= 'a' && name[0] <= 'z') ||
+      (name[0] >= 'A' && name[0] <= 'Z')) &&
+     name[1] == ':' &&
+     IsPathSeparator(name[2]);
+#else
+  return IsPathSeparator(name[0]);
+#endif
+}
+
+// Returns a pathname for a file that does not currently exist. The pathname
+// will be directory/base_name.extension or
+// directory/base_name_<number>.extension if directory/base_name.extension
+// already exists. The number will be incremented until a pathname is found
+// that does not already exist.
+// Examples: 'dir/foo_test.xml' or 'dir/foo_test_1.xml'.
+// There could be a race condition if two or more processes are calling this
+// function at the same time -- they could both pick the same filename.
+FilePath FilePath::GenerateUniqueFileName(const FilePath& directory,
+                                          const FilePath& base_name,
+                                          const char* extension) {
+  FilePath full_pathname;
+  int number = 0;
+  do {
+    full_pathname.Set(MakeFileName(directory, base_name, number++, extension));
+  } while (full_pathname.FileOrDirectoryExists());
+  return full_pathname;
+}
+
+// Returns true if FilePath ends with a path separator, which indicates that
+// it is intended to represent a directory. Returns false otherwise.
+// This does NOT check that a directory (or file) actually exists.
+bool FilePath::IsDirectory() const {
+  return !pathname_.empty() &&
+         IsPathSeparator(pathname_.c_str()[pathname_.length() - 1]);
+}
+
+// Create directories so that path exists. Returns true if successful or if
+// the directories already exist; returns false if unable to create directories
+// for any reason.
+bool FilePath::CreateDirectoriesRecursively() const {
+  if (!this->IsDirectory()) {
+    return false;
+  }
+
+  if (pathname_.length() == 0 || this->DirectoryExists()) {
+    return true;
+  }
+
+  const FilePath parent(this->RemoveTrailingPathSeparator().RemoveFileName());
+  return parent.CreateDirectoriesRecursively() && this->CreateFolder();
+}
+
+// Create the directory so that path exists. Returns true if successful or
+// if the directory already exists; returns false if unable to create the
+// directory for any reason, including if the parent directory does not
+// exist. Not named "CreateDirectory" because that's a macro on Windows.
+bool FilePath::CreateFolder() const {
+#if GTEST_OS_WINDOWS_MOBILE
+  FilePath removed_sep(this->RemoveTrailingPathSeparator());
+  LPCWSTR unicode = String::AnsiToUtf16(removed_sep.c_str());
+  int result = CreateDirectory(unicode, NULL) ? 0 : -1;
+  delete [] unicode;
+#elif GTEST_OS_WINDOWS
+  int result = _mkdir(pathname_.c_str());
+#else
+  int result = mkdir(pathname_.c_str(), 0777);
+#endif  // GTEST_OS_WINDOWS_MOBILE
+
+  if (result == -1) {
+    return this->DirectoryExists();  // An error is OK if the directory exists.
+  }
+  return true;  // No error.
+}
+
+// If input name has a trailing separator character, remove it and return the
+// name, otherwise return the name string unmodified.
+// On Windows platform, uses \ as the separator, other platforms use /.
+FilePath FilePath::RemoveTrailingPathSeparator() const {
+  return IsDirectory()
+      ? FilePath(String(pathname_.c_str(), pathname_.length() - 1))
+      : *this;
+}
+
+// Removes any redundant separators that might be in the pathname.
+// For example, "bar///foo" becomes "bar/foo". Does not eliminate other
+// redundancies that might be in a pathname involving "." or "..".
+// TODO(wan@google.com): handle Windows network shares (e.g. \\server\share).
+void FilePath::Normalize() {
+  if (pathname_.c_str() == NULL) {
+    pathname_ = "";
+    return;
+  }
+  const char* src = pathname_.c_str();
+  char* const dest = new char[pathname_.length() + 1];
+  char* dest_ptr = dest;
+  memset(dest_ptr, 0, pathname_.length() + 1);
+
+  while (*src != '\0') {
+    *dest_ptr = *src;
+    if (!IsPathSeparator(*src)) {
+      src++;
+    } else {
+#if GTEST_HAS_ALT_PATH_SEP_
+      if (*dest_ptr == kAlternatePathSeparator) {
+        *dest_ptr = kPathSeparator;
+      }
+#endif
+      while (IsPathSeparator(*src))
+        src++;
+    }
+    dest_ptr++;
+  }
+  *dest_ptr = '\0';
+  pathname_ = dest;
+  delete[] dest;
+}
+
+}  // namespace internal
+}  // namespace testing
+// Copyright 2008, Google Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: wan@google.com (Zhanyong Wan)
+
+
+#include <limits.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#if GTEST_OS_WINDOWS_MOBILE
+# include <windows.h>  // For TerminateProcess()
+#elif GTEST_OS_WINDOWS
+# include <io.h>
+# include <sys/stat.h>
+#else
+# include <unistd.h>
+#endif  // GTEST_OS_WINDOWS_MOBILE
+
+#if GTEST_OS_MAC
+# include <mach/mach_init.h>
+# include <mach/task.h>
+# include <mach/vm_map.h>
+#endif  // GTEST_OS_MAC
+
+
+// Indicates that this translation unit is part of Google Test's
+// implementation.  It must come before gtest-internal-inl.h is
+// included, or there will be a compiler error.  This trick is to
+// prevent a user from accidentally including gtest-internal-inl.h in
+// his code.
+#define GTEST_IMPLEMENTATION_ 1
+#undef GTEST_IMPLEMENTATION_
+
+namespace testing {
+namespace internal {
+
+#if defined(_MSC_VER) || defined(__BORLANDC__)
+// MSVC and C++Builder do not provide a definition of STDERR_FILENO.
+const int kStdOutFileno = 1;
+const int kStdErrFileno = 2;
+#else
+const int kStdOutFileno = STDOUT_FILENO;
+const int kStdErrFileno = STDERR_FILENO;
+#endif  // _MSC_VER
+
+#if GTEST_OS_MAC
+
+// Returns the number of threads running in the process, or 0 to indicate that
+// we cannot detect it.
+size_t GetThreadCount() {
+  const task_t task = mach_task_self();
+  mach_msg_type_number_t thread_count;
+  thread_act_array_t thread_list;
+  const kern_return_t status = task_threads(task, &thread_list, &thread_count);
+  if (status == KERN_SUCCESS) {
+    // task_threads allocates resources in thread_list and we need to free them
+    // to avoid leaks.
+    vm_deallocate(task,
+                  reinterpret_cast<vm_address_t>(thread_list),
+                  sizeof(thread_t) * thread_count);
+    return static_cast<size_t>(thread_count);
+  } else {
+    return 0;
+  }
+}
+
+#else
+
+size_t GetThreadCount() {
+  // There's no portable way to detect the number of threads, so we just
+  // return 0 to indicate that we cannot detect it.
+  return 0;
+}
+
+#endif  // GTEST_OS_MAC
+
+#if GTEST_USES_POSIX_RE
+
+// Implements RE.  Currently only needed for death tests.
+
+RE::~RE() {
+  if (is_valid_) {
+    // regfree'ing an invalid regex might crash because the content
+    // of the regex is undefined. Since the regex's are essentially
+    // the same, one cannot be valid (or invalid) without the other
+    // being so too.
+    regfree(&partial_regex_);
+    regfree(&full_regex_);
+  }
+  free(const_cast<char*>(pattern_));
+}
+
+// Returns true iff regular expression re matches the entire str.
+bool RE::FullMatch(const char* str, const RE& re) {
+  if (!re.is_valid_) return false;
+
+  regmatch_t match;
+  return regexec(&re.full_regex_, str, 1, &match, 0) == 0;
+}
+
+// Returns true iff regular expression re matches a substring of str
+// (including str itself).
+bool RE::PartialMatch(const char* str, const RE& re) {
+  if (!re.is_valid_) return false;
+
+  regmatch_t match;
+  return regexec(&re.partial_regex_, str, 1, &match, 0) == 0;
+}
+
+// Initializes an RE from its string representation.
+void RE::Init(const char* regex) {
+  pattern_ = posix::StrDup(regex);
+
+  // Reserves enough bytes to hold the regular expression used for a
+  // full match.
+  const size_t full_regex_len = strlen(regex) + 10;
+  char* const full_pattern = new char[full_regex_len];
+
+  snprintf(full_pattern, full_regex_len, "^(%s)$", regex);
+  is_valid_ = regcomp(&full_regex_, full_pattern, REG_EXTENDED) == 0;
+  // We want to call regcomp(&partial_regex_, ...) even if the
+  // previous expression returns false.  Otherwise partial_regex_ may
+  // not be properly initialized can may cause trouble when it's
+  // freed.
+  //
+  // Some implementation of POSIX regex (e.g. on at least some
+  // versions of Cygwin) doesn't accept the empty string as a valid
+  // regex.  We change it to an equivalent form "()" to be safe.
+  if (is_valid_) {
+    const char* const partial_regex = (*regex == '\0') ? "()" : regex;
+    is_valid_ = regcomp(&partial_regex_, partial_regex, REG_EXTENDED) == 0;
+  }
+  EXPECT_TRUE(is_valid_)
+      << "Regular expression \"" << regex
+      << "\" is not a valid POSIX Extended regular expression.";
+
+  delete[] full_pattern;
+}
+
+#elif GTEST_USES_SIMPLE_RE
+
+// Returns true iff ch appears anywhere in str (excluding the
+// terminating '\0' character).
+bool IsInSet(char ch, const char* str) {
+  return ch != '\0' && strchr(str, ch) != NULL;
+}
+
+// Returns true iff ch belongs to the given classification.  Unlike
+// similar functions in <ctype.h>, these aren't affected by the
+// current locale.
+bool IsAsciiDigit(char ch) { return '0' <= ch && ch <= '9'; }
+bool IsAsciiPunct(char ch) {
+  return IsInSet(ch, "^-!\"#$%&'()*+,./:;<=>?@[\\]_`{|}~");
+}
+bool IsRepeat(char ch) { return IsInSet(ch, "?*+"); }
+bool IsAsciiWhiteSpace(char ch) { return IsInSet(ch, " \f\n\r\t\v"); }
+bool IsAsciiWordChar(char ch) {
+  return ('a' <= ch && ch <= 'z') || ('A' <= ch && ch <= 'Z') ||
+      ('0' <= ch && ch <= '9') || ch == '_';
+}
+
+// Returns true iff "\\c" is a supported escape sequence.
+bool IsValidEscape(char c) {
+  return (IsAsciiPunct(c) || IsInSet(c, "dDfnrsStvwW"));
+}
+
+// Returns true iff the given atom (specified by escaped and pattern)
+// matches ch.  The result is undefined if the atom is invalid.
+bool AtomMatchesChar(bool escaped, char pattern_char, char ch) {
+  if (escaped) {  // "\\p" where p is pattern_char.
+    switch (pattern_char) {
+      case 'd': return IsAsciiDigit(ch);
+      case 'D': return !IsAsciiDigit(ch);
+      case 'f': return ch == '\f';
+      case 'n': return ch == '\n';
+      case 'r': return ch == '\r';
+      case 's': return IsAsciiWhiteSpace(ch);
+      case 'S': return !IsAsciiWhiteSpace(ch);
+      case 't': return ch == '\t';
+      case 'v': return ch == '\v';
+      case 'w': return IsAsciiWordChar(ch);
+      case 'W': return !IsAsciiWordChar(ch);
+    }
+    return IsAsciiPunct(pattern_char) && pattern_char == ch;
+  }
+
+  return (pattern_char == '.' && ch != '\n') || pattern_char == ch;
+}
+
+// Helper function used by ValidateRegex() to format error messages.
+String FormatRegexSyntaxError(const char* regex, int index) {
+  return (Message() << "Syntax error at index " << index
+          << " in simple regular expression \"" << regex << "\": ").GetString();
+}
+
+// Generates non-fatal failures and returns false if regex is invalid;
+// otherwise returns true.
+bool ValidateRegex(const char* regex) {
+  if (regex == NULL) {
+    // TODO(wan@google.com): fix the source file location in the
+    // assertion failures to match where the regex is used in user
+    // code.
+    ADD_FAILURE() << "NULL is not a valid simple regular expression.";
+    return false;
+  }
+
+  bool is_valid = true;
+
+  // True iff ?, *, or + can follow the previous atom.
+  bool prev_repeatable = false;
+  for (int i = 0; regex[i]; i++) {
+    if (regex[i] == '\\') {  // An escape sequence
+      i++;
+      if (regex[i] == '\0') {
+        ADD_FAILURE() << FormatRegexSyntaxError(regex, i - 1)
+                      << "'\\' cannot appear at the end.";
+        return false;
+      }
+
+      if (!IsValidEscape(regex[i])) {
+        ADD_FAILURE() << FormatRegexSyntaxError(regex, i - 1)
+                      << "invalid escape sequence \"\\" << regex[i] << "\".";
+        is_valid = false;
+      }
+      prev_repeatable = true;
+    } else {  // Not an escape sequence.
+      const char ch = regex[i];
+
+      if (ch == '^' && i > 0) {
+        ADD_FAILURE() << FormatRegexSyntaxError(regex, i)
+                      << "'^' can only appear at the beginning.";
+        is_valid = false;
+      } else if (ch == '$' && regex[i + 1] != '\0') {
+        ADD_FAILURE() << FormatRegexSyntaxError(regex, i)
+                      << "'$' can only appear at the end.";
+        is_valid = false;
+      } else if (IsInSet(ch, "()[]{}|")) {
+        ADD_FAILURE() << FormatRegexSyntaxError(regex, i)
+                      << "'" << ch << "' is unsupported.";
+        is_valid = false;
+      } else if (IsRepeat(ch) && !prev_repeatable) {
+        ADD_FAILURE() << FormatRegexSyntaxError(regex, i)
+                      << "'" << ch << "' can only follow a repeatable token.";
+        is_valid = false;
+      }
+
+      prev_repeatable = !IsInSet(ch, "^$?*+");
+    }
+  }
+
+  return is_valid;
+}
+
+// Matches a repeated regex atom followed by a valid simple regular
+// expression.  The regex atom is defined as c if escaped is false,
+// or \c otherwise.  repeat is the repetition meta character (?, *,
+// or +).  The behavior is undefined if str contains too many
+// characters to be indexable by size_t, in which case the test will
+// probably time out anyway.  We are fine with this limitation as
+// std::string has it too.
+bool MatchRepetitionAndRegexAtHead(
+    bool escaped, char c, char repeat, const char* regex,
+    const char* str) {
+  const size_t min_count = (repeat == '+') ? 1 : 0;
+  const size_t max_count = (repeat == '?') ? 1 :
+      static_cast<size_t>(-1) - 1;
+  // We cannot call numeric_limits::max() as it conflicts with the
+  // max() macro on Windows.
+
+  for (size_t i = 0; i <= max_count; ++i) {
+    // We know that the atom matches each of the first i characters in str.
+    if (i >= min_count && MatchRegexAtHead(regex, str + i)) {
+      // We have enough matches at the head, and the tail matches too.
+      // Since we only care about *whether* the pattern matches str
+      // (as opposed to *how* it matches), there is no need to find a
+      // greedy match.
+      return true;
+    }
+    if (str[i] == '\0' || !AtomMatchesChar(escaped, c, str[i]))
+      return false;
+  }
+  return false;
+}
+
+// Returns true iff regex matches a prefix of str.  regex must be a
+// valid simple regular expression and not start with "^", or the
+// result is undefined.
+bool MatchRegexAtHead(const char* regex, const char* str) {
+  if (*regex == '\0')  // An empty regex matches a prefix of anything.
+    return true;
+
+  // "$" only matches the end of a string.  Note that regex being
+  // valid guarantees that there's nothing after "$" in it.
+  if (*regex == '$')
+    return *str == '\0';
+
+  // Is the first thing in regex an escape sequence?
+  const bool escaped = *regex == '\\';
+  if (escaped)
+    ++regex;
+  if (IsRepeat(regex[1])) {
+    // MatchRepetitionAndRegexAtHead() calls MatchRegexAtHead(), so
+    // here's an indirect recursion.  It terminates as the regex gets
+    // shorter in each recursion.
+    return MatchRepetitionAndRegexAtHead(
+        escaped, regex[0], regex[1], regex + 2, str);
+  } else {
+    // regex isn't empty, isn't "$", and doesn't start with a
+    // repetition.  We match the first atom of regex with the first
+    // character of str and recurse.
+    return (*str != '\0') && AtomMatchesChar(escaped, *regex, *str) &&
+        MatchRegexAtHead(regex + 1, str + 1);
+  }
+}
+
+// Returns true iff regex matches any substring of str.  regex must be
+// a valid simple regular expression, or the result is undefined.
+//
+// The algorithm is recursive, but the recursion depth doesn't exceed
+// the regex length, so we won't need to worry about running out of
+// stack space normally.  In rare cases the time complexity can be
+// exponential with respect to the regex length + the string length,
+// but usually it's must faster (often close to linear).
+bool MatchRegexAnywhere(const char* regex, const char* str) {
+  if (regex == NULL || str == NULL)
+    return false;
+
+  if (*regex == '^')
+    return MatchRegexAtHead(regex + 1, str);
+
+  // A successful match can be anywhere in str.
+  do {
+    if (MatchRegexAtHead(regex, str))
+      return true;
+  } while (*str++ != '\0');
+  return false;
+}
+
+// Implements the RE class.
+
+RE::~RE() {
+  free(const_cast<char*>(pattern_));
+  free(const_cast<char*>(full_pattern_));
+}
+
+// Returns true iff regular expression re matches the entire str.
+bool RE::FullMatch(const char* str, const RE& re) {
+  return re.is_valid_ && MatchRegexAnywhere(re.full_pattern_, str);
+}
+
+// Returns true iff regular expression re matches a substring of str
+// (including str itself).
+bool RE::PartialMatch(const char* str, const RE& re) {
+  return re.is_valid_ && MatchRegexAnywhere(re.pattern_, str);
+}
+
+// Initializes an RE from its string representation.
+void RE::Init(const char* regex) {
+  pattern_ = full_pattern_ = NULL;
+  if (regex != NULL) {
+    pattern_ = posix::StrDup(regex);
+  }
+
+  is_valid_ = ValidateRegex(regex);
+  if (!is_valid_) {
+    // No need to calculate the full pattern when the regex is invalid.
+    return;
+  }
+
+  const size_t len = strlen(regex);
+  // Reserves enough bytes to hold the regular expression used for a
+  // full match: we need space to prepend a '^', append a '$', and
+  // terminate the string with '\0'.
+  char* buffer = static_cast<char*>(malloc(len + 3));
+  full_pattern_ = buffer;
+
+  if (*regex != '^')
+    *buffer++ = '^';  // Makes sure full_pattern_ starts with '^'.
+
+  // We don't use snprintf or strncpy, as they trigger a warning when
+  // compiled with VC++ 8.0.
+  memcpy(buffer, regex, len);
+  buffer += len;
+
+  if (len == 0 || regex[len - 1] != '$')
+    *buffer++ = '$';  // Makes sure full_pattern_ ends with '$'.
+
+  *buffer = '\0';
+}
+
+#endif  // GTEST_USES_POSIX_RE
+
+const char kUnknownFile[] = "unknown file";
+
+// Formats a source file path and a line number as they would appear
+// in an error message from the compiler used to compile this code.
+GTEST_API_ ::std::string FormatFileLocation(const char* file, int line) {
+  const char* const file_name = file == NULL ? kUnknownFile : file;
+
+  if (line < 0) {
+    return String::Format("%s:", file_name).c_str();
+  }
+#ifdef _MSC_VER
+  return String::Format("%s(%d):", file_name, line).c_str();
+#else
+  return String::Format("%s:%d:", file_name, line).c_str();
+#endif  // _MSC_VER
+}
+
+// Formats a file location for compiler-independent XML output.
+// Although this function is not platform dependent, we put it next to
+// FormatFileLocation in order to contrast the two functions.
+// Note that FormatCompilerIndependentFileLocation() does NOT append colon
+// to the file location it produces, unlike FormatFileLocation().
+GTEST_API_ ::std::string FormatCompilerIndependentFileLocation(
+    const char* file, int line) {
+  const char* const file_name = file == NULL ? kUnknownFile : file;
+
+  if (line < 0)
+    return file_name;
+  else
+    return String::Format("%s:%d", file_name, line).c_str();
+}
+
+
+GTestLog::GTestLog(GTestLogSeverity severity, const char* file, int line)
+    : severity_(severity) {
+  const char* const marker =
+      severity == GTEST_INFO ?    "[  INFO ]" :
+      severity == GTEST_WARNING ? "[WARNING]" :
+      severity == GTEST_ERROR ?   "[ ERROR ]" : "[ FATAL ]";
+  GetStream() << ::std::endl << marker << " "
+              << FormatFileLocation(file, line).c_str() << ": ";
+}
+
+// Flushes the buffers and, if severity is GTEST_FATAL, aborts the program.
+GTestLog::~GTestLog() {
+  GetStream() << ::std::endl;
+  if (severity_ == GTEST_FATAL) {
+    fflush(stderr);
+    posix::Abort();
+  }
+}
+// Disable Microsoft deprecation warnings for POSIX functions called from
+// this class (creat, dup, dup2, and close)
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable: 4996)
+#endif  // _MSC_VER
+
+#if GTEST_HAS_STREAM_REDIRECTION
+
+// Object that captures an output stream (stdout/stderr).
+class CapturedStream {
+ public:
+  // The ctor redirects the stream to a temporary file.
+  CapturedStream(int fd) : fd_(fd), uncaptured_fd_(dup(fd)) {
+
+# if GTEST_OS_WINDOWS
+    char temp_dir_path[MAX_PATH + 1] = { '\0' };  // NOLINT
+    char temp_file_path[MAX_PATH + 1] = { '\0' };  // NOLINT
+
+    ::GetTempPathA(sizeof(temp_dir_path), temp_dir_path);
+    const UINT success = ::GetTempFileNameA(temp_dir_path,
+                                            "gtest_redir",
+                                            0,  // Generate unique file name.
+                                            temp_file_path);
+    GTEST_CHECK_(success != 0)
+        << "Unable to create a temporary file in " << temp_dir_path;
+    const int captured_fd = creat(temp_file_path, _S_IREAD | _S_IWRITE);
+    GTEST_CHECK_(captured_fd != -1) << "Unable to open temporary file "
+                                    << temp_file_path;
+    filename_ = temp_file_path;
+# else
+    // There's no guarantee that a test has write access to the
+    // current directory, so we create the temporary file in the /tmp
+    // directory instead.
+    char name_template[] = "/tmp/captured_stream.XXXXXX";
+    const int captured_fd = mkstemp(name_template);
+    filename_ = name_template;
+# endif  // GTEST_OS_WINDOWS
+    fflush(NULL);
+    dup2(captured_fd, fd_);
+    close(captured_fd);
+  }
+
+  ~CapturedStream() {
+    remove(filename_.c_str());
+  }
+
+  String GetCapturedString() {
+    if (uncaptured_fd_ != -1) {
+      // Restores the original stream.
+      fflush(NULL);
+      dup2(uncaptured_fd_, fd_);
+      close(uncaptured_fd_);
+      uncaptured_fd_ = -1;
+    }
+
+    FILE* const file = posix::FOpen(filename_.c_str(), "r");
+    const String content = ReadEntireFile(file);
+    posix::FClose(file);
+    return content;
+  }
+
+ private:
+  // Reads the entire content of a file as a String.
+  static String ReadEntireFile(FILE* file);
+
+  // Returns the size (in bytes) of a file.
+  static size_t GetFileSize(FILE* file);
+
+  const int fd_;  // A stream to capture.
+  int uncaptured_fd_;
+  // Name of the temporary file holding the stderr output.
+  ::std::string filename_;
+
+  GTEST_DISALLOW_COPY_AND_ASSIGN_(CapturedStream);
+};
+
+// Returns the size (in bytes) of a file.
+size_t CapturedStream::GetFileSize(FILE* file) {
+  fseek(file, 0, SEEK_END);
+  return static_cast<size_t>(ftell(file));
+}
+
+// Reads the entire content of a file as a string.
+String CapturedStream::ReadEntireFile(FILE* file) {
+  const size_t file_size = GetFileSize(file);
+  char* const buffer = new char[file_size];
+
+  size_t bytes_last_read = 0;  // # of bytes read in the last fread()
+  size_t bytes_read = 0;       // # of bytes read so far
+
+  fseek(file, 0, SEEK_SET);
+
+  // Keeps reading the file until we cannot read further or the
+  // pre-determined file size is reached.
+  do {
+    bytes_last_read = fread(buffer+bytes_read, 1, file_size-bytes_read, file);
+    bytes_read += bytes_last_read;
+  } while (bytes_last_read > 0 && bytes_read < file_size);
+
+  const String content(buffer, bytes_read);
+  delete[] buffer;
+
+  return content;
+}
+
+# ifdef _MSC_VER
+#  pragma warning(pop)
+# endif  // _MSC_VER
+
+static CapturedStream* g_captured_stderr = NULL;
+static CapturedStream* g_captured_stdout = NULL;
+
+// Starts capturing an output stream (stdout/stderr).
+void CaptureStream(int fd, const char* stream_name, CapturedStream** stream) {
+  if (*stream != NULL) {
+    GTEST_LOG_(FATAL) << "Only one " << stream_name
+                      << " capturer can exist at a time.";
+  }
+  *stream = new CapturedStream(fd);
+}
+
+// Stops capturing the output stream and returns the captured string.
+String GetCapturedStream(CapturedStream** captured_stream) {
+  const String content = (*captured_stream)->GetCapturedString();
+
+  delete *captured_stream;
+  *captured_stream = NULL;
+
+  return content;
+}
+
+// Starts capturing stdout.
+void CaptureStdout() {
+  CaptureStream(kStdOutFileno, "stdout", &g_captured_stdout);
+}
+
+// Starts capturing stderr.
+void CaptureStderr() {
+  CaptureStream(kStdErrFileno, "stderr", &g_captured_stderr);
+}
+
+// Stops capturing stdout and returns the captured string.
+String GetCapturedStdout() { return GetCapturedStream(&g_captured_stdout); }
+
+// Stops capturing stderr and returns the captured string.
+String GetCapturedStderr() { return GetCapturedStream(&g_captured_stderr); }
+
+#endif  // GTEST_HAS_STREAM_REDIRECTION
+
+#if GTEST_HAS_DEATH_TEST
+
+// A copy of all command line arguments.  Set by InitGoogleTest().
+::std::vector<String> g_argvs;
+
+// Returns the command line as a vector of strings.
+const ::std::vector<String>& GetArgvs() { return g_argvs; }
+
+#endif  // GTEST_HAS_DEATH_TEST
+
+#if GTEST_OS_WINDOWS_MOBILE
+namespace posix {
+void Abort() {
+  DebugBreak();
+  TerminateProcess(GetCurrentProcess(), 1);
+}
+}  // namespace posix
+#endif  // GTEST_OS_WINDOWS_MOBILE
+
+// Returns the name of the environment variable corresponding to the
+// given flag.  For example, FlagToEnvVar("foo") will return
+// "GTEST_FOO" in the open-source version.
+static String FlagToEnvVar(const char* flag) {
+  const String full_flag =
+      (Message() << GTEST_FLAG_PREFIX_ << flag).GetString();
+
+  Message env_var;
+  for (size_t i = 0; i != full_flag.length(); i++) {
+    env_var << ToUpper(full_flag.c_str()[i]);
+  }
+
+  return env_var.GetString();
+}
+
+// Parses 'str' for a 32-bit signed integer.  If successful, writes
+// the result to *value and returns true; otherwise leaves *value
+// unchanged and returns false.
+bool ParseInt32(const Message& src_text, const char* str, Int32* value) {
+  // Parses the environment variable as a decimal integer.
+  char* end = NULL;
+  const long long_value = strtol(str, &end, 10);  // NOLINT
+
+  // Has strtol() consumed all characters in the string?
+  if (*end != '\0') {
+    // No - an invalid character was encountered.
+    Message msg;
+    msg << "WARNING: " << src_text
+        << " is expected to be a 32-bit integer, but actually"
+        << " has value \"" << str << "\".\n";
+    printf("%s", msg.GetString().c_str());
+    fflush(stdout);
+    return false;
+  }
+
+  // Is the parsed value in the range of an Int32?
+  const Int32 result = static_cast<Int32>(long_value);
+  if (long_value == LONG_MAX || long_value == LONG_MIN ||
+      // The parsed value overflows as a long.  (strtol() returns
+      // LONG_MAX or LONG_MIN when the input overflows.)
+      result != long_value
+      // The parsed value overflows as an Int32.
+      ) {
+    Message msg;
+    msg << "WARNING: " << src_text
+        << " is expected to be a 32-bit integer, but actually"
+        << " has value " << str << ", which overflows.\n";
+    printf("%s", msg.GetString().c_str());
+    fflush(stdout);
+    return false;
+  }
+
+  *value = result;
+  return true;
+}
+
+// Reads and returns the Boolean environment variable corresponding to
+// the given flag; if it's not set, returns default_value.
+//
+// The value is considered true iff it's not "0".
+bool BoolFromGTestEnv(const char* flag, bool default_value) {
+  const String env_var = FlagToEnvVar(flag);
+  const char* const string_value = posix::GetEnv(env_var.c_str());
+  return string_value == NULL ?
+      default_value : strcmp(string_value, "0") != 0;
+}
+
+// Reads and returns a 32-bit integer stored in the environment
+// variable corresponding to the given flag; if it isn't set or
+// doesn't represent a valid 32-bit integer, returns default_value.
+Int32 Int32FromGTestEnv(const char* flag, Int32 default_value) {
+  const String env_var = FlagToEnvVar(flag);
+  const char* const string_value = posix::GetEnv(env_var.c_str());
+  if (string_value == NULL) {
+    // The environment variable is not set.
+    return default_value;
+  }
+
+  Int32 result = default_value;
+  if (!ParseInt32(Message() << "Environment variable " << env_var,
+                  string_value, &result)) {
+    printf("The default value %s is used.\n",
+           (Message() << default_value).GetString().c_str());
+    fflush(stdout);
+    return default_value;
+  }
+
+  return result;
+}
+
+// Reads and returns the string environment variable corresponding to
+// the given flag; if it's not set, returns default_value.
+const char* StringFromGTestEnv(const char* flag, const char* default_value) {
+  const String env_var = FlagToEnvVar(flag);
+  const char* const value = posix::GetEnv(env_var.c_str());
+  return value == NULL ? default_value : value;
+}
+
+}  // namespace internal
+}  // namespace testing
+// Copyright 2007, Google Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: wan@google.com (Zhanyong Wan)
+
+// Google Test - The Google C++ Testing Framework
+//
+// This file implements a universal value printer that can print a
+// value of any type T:
+//
+//   void ::testing::internal::UniversalPrinter<T>::Print(value, ostream_ptr);
+//
+// It uses the << operator when possible, and prints the bytes in the
+// object otherwise.  A user can override its behavior for a class
+// type Foo by defining either operator<<(::std::ostream&, const Foo&)
+// or void PrintTo(const Foo&, ::std::ostream*) in the namespace that
+// defines Foo.
+
+#include <ctype.h>
+#include <stdio.h>
+#include <ostream>  // NOLINT
+#include <string>
+
+namespace testing {
+
+namespace {
+
+using ::std::ostream;
+
+#if GTEST_OS_WINDOWS_MOBILE  // Windows CE does not define _snprintf_s.
+# define snprintf _snprintf
+#elif _MSC_VER >= 1400  // VC 8.0 and later deprecate snprintf and _snprintf.
+# define snprintf _snprintf_s
+#elif _MSC_VER
+# define snprintf _snprintf
+#endif  // GTEST_OS_WINDOWS_MOBILE
+
+// Prints a segment of bytes in the given object.
+void PrintByteSegmentInObjectTo(const unsigned char* obj_bytes, size_t start,
+                                size_t count, ostream* os) {
+  char text[5] = "";
+  for (size_t i = 0; i != count; i++) {
+    const size_t j = start + i;
+    if (i != 0) {
+      // Organizes the bytes into groups of 2 for easy parsing by
+      // human.
+      if ((j % 2) == 0)
+        *os << ' ';
+      else
+        *os << '-';
+    }
+    snprintf(text, sizeof(text), "%02X", obj_bytes[j]);
+    *os << text;
+  }
+}
+
+// Prints the bytes in the given value to the given ostream.
+void PrintBytesInObjectToImpl(const unsigned char* obj_bytes, size_t count,
+                              ostream* os) {
+  // Tells the user how big the object is.
+  *os << count << "-byte object <";
+
+  const size_t kThreshold = 132;
+  const size_t kChunkSize = 64;
+  // If the object size is bigger than kThreshold, we'll have to omit
+  // some details by printing only the first and the last kChunkSize
+  // bytes.
+  // TODO(wan): let the user control the threshold using a flag.
+  if (count < kThreshold) {
+    PrintByteSegmentInObjectTo(obj_bytes, 0, count, os);
+  } else {
+    PrintByteSegmentInObjectTo(obj_bytes, 0, kChunkSize, os);
+    *os << " ... ";
+    // Rounds up to 2-byte boundary.
+    const size_t resume_pos = (count - kChunkSize + 1)/2*2;
+    PrintByteSegmentInObjectTo(obj_bytes, resume_pos, count - resume_pos, os);
+  }
+  *os << ">";
+}
+
+}  // namespace
+
+namespace internal2 {
+
+// Delegates to PrintBytesInObjectToImpl() to print the bytes in the
+// given object.  The delegation simplifies the implementation, which
+// uses the << operator and thus is easier done outside of the
+// ::testing::internal namespace, which contains a << operator that
+// sometimes conflicts with the one in STL.
+void PrintBytesInObjectTo(const unsigned char* obj_bytes, size_t count,
+                          ostream* os) {
+  PrintBytesInObjectToImpl(obj_bytes, count, os);
+}
+
+}  // namespace internal2
+
+namespace internal {
+
+// Depending on the value of a char (or wchar_t), we print it in one
+// of three formats:
+//   - as is if it's a printable ASCII (e.g. 'a', '2', ' '),
+//   - as a hexidecimal escape sequence (e.g. '\x7F'), or
+//   - as a special escape sequence (e.g. '\r', '\n').
+enum CharFormat {
+  kAsIs,
+  kHexEscape,
+  kSpecialEscape
+};
+
+// Returns true if c is a printable ASCII character.  We test the
+// value of c directly instead of calling isprint(), which is buggy on
+// Windows Mobile.
+inline bool IsPrintableAscii(wchar_t c) {
+  return 0x20 <= c && c <= 0x7E;
+}
+
+// Prints a wide or narrow char c as a character literal without the
+// quotes, escaping it when necessary; returns how c was formatted.
+// The template argument UnsignedChar is the unsigned version of Char,
+// which is the type of c.
+template <typename UnsignedChar, typename Char>
+static CharFormat PrintAsCharLiteralTo(Char c, ostream* os) {
+  switch (static_cast<wchar_t>(c)) {
+    case L'\0':
+      *os << "\\0";
+      break;
+    case L'\'':
+      *os << "\\'";
+      break;
+    case L'\\':
+      *os << "\\\\";
+      break;
+    case L'\a':
+      *os << "\\a";
+      break;
+    case L'\b':
+      *os << "\\b";
+      break;
+    case L'\f':
+      *os << "\\f";
+      break;
+    case L'\n':
+      *os << "\\n";
+      break;
+    case L'\r':
+      *os << "\\r";
+      break;
+    case L'\t':
+      *os << "\\t";
+      break;
+    case L'\v':
+      *os << "\\v";
+      break;
+    default:
+      if (IsPrintableAscii(c)) {
+        *os << static_cast<char>(c);
+        return kAsIs;
+      } else {
+        *os << String::Format("\\x%X", static_cast<UnsignedChar>(c));
+        return kHexEscape;
+      }
+  }
+  return kSpecialEscape;
+}
+
+// Prints a char c as if it's part of a string literal, escaping it when
+// necessary; returns how c was formatted.
+static CharFormat PrintAsWideStringLiteralTo(wchar_t c, ostream* os) {
+  switch (c) {
+    case L'\'':
+      *os << "'";
+      return kAsIs;
+    case L'"':
+      *os << "\\\"";
+      return kSpecialEscape;
+    default:
+      return PrintAsCharLiteralTo<wchar_t>(c, os);
+  }
+}
+
+// Prints a char c as if it's part of a string literal, escaping it when
+// necessary; returns how c was formatted.
+static CharFormat PrintAsNarrowStringLiteralTo(char c, ostream* os) {
+  return PrintAsWideStringLiteralTo(static_cast<unsigned char>(c), os);
+}
+
+// Prints a wide or narrow character c and its code.  '\0' is printed
+// as "'\\0'", other unprintable characters are also properly escaped
+// using the standard C++ escape sequence.  The template argument
+// UnsignedChar is the unsigned version of Char, which is the type of c.
+template <typename UnsignedChar, typename Char>
+void PrintCharAndCodeTo(Char c, ostream* os) {
+  // First, print c as a literal in the most readable form we can find.
+  *os << ((sizeof(c) > 1) ? "L'" : "'");
+  const CharFormat format = PrintAsCharLiteralTo<UnsignedChar>(c, os);
+  *os << "'";
+
+  // To aid user debugging, we also print c's code in decimal, unless
+  // it's 0 (in which case c was printed as '\\0', making the code
+  // obvious).
+  if (c == 0)
+    return;
+  *os << " (" << String::Format("%d", c).c_str();
+
+  // For more convenience, we print c's code again in hexidecimal,
+  // unless c was already printed in the form '\x##' or the code is in
+  // [1, 9].
+  if (format == kHexEscape || (1 <= c && c <= 9)) {
+    // Do nothing.
+  } else {
+    *os << String::Format(", 0x%X",
+                          static_cast<UnsignedChar>(c)).c_str();
+  }
+  *os << ")";
+}
+
+void PrintTo(unsigned char c, ::std::ostream* os) {
+  PrintCharAndCodeTo<unsigned char>(c, os);
+}
+void PrintTo(signed char c, ::std::ostream* os) {
+  PrintCharAndCodeTo<unsigned char>(c, os);
+}
+
+// Prints a wchar_t as a symbol if it is printable or as its internal
+// code otherwise and also as its code.  L'\0' is printed as "L'\\0'".
+void PrintTo(wchar_t wc, ostream* os) {
+  PrintCharAndCodeTo<wchar_t>(wc, os);
+}
+
+// Prints the given array of characters to the ostream.
+// The array starts at *begin, the length is len, it may include '\0' characters
+// and may not be null-terminated.
+static void PrintCharsAsStringTo(const char* begin, size_t len, ostream* os) {
+  *os << "\"";
+  bool is_previous_hex = false;
+  for (size_t index = 0; index < len; ++index) {
+    const char cur = begin[index];
+    if (is_previous_hex && IsXDigit(cur)) {
+      // Previous character is of '\x..' form and this character can be
+      // interpreted as another hexadecimal digit in its number. Break string to
+      // disambiguate.
+      *os << "\" \"";
+    }
+    is_previous_hex = PrintAsNarrowStringLiteralTo(cur, os) == kHexEscape;
+  }
+  *os << "\"";
+}
+
+// Prints a (const) char array of 'len' elements, starting at address 'begin'.
+void UniversalPrintArray(const char* begin, size_t len, ostream* os) {
+  PrintCharsAsStringTo(begin, len, os);
+}
+
+// Prints the given array of wide characters to the ostream.
+// The array starts at *begin, the length is len, it may include L'\0'
+// characters and may not be null-terminated.
+static void PrintWideCharsAsStringTo(const wchar_t* begin, size_t len,
+                                     ostream* os) {
+  *os << "L\"";
+  bool is_previous_hex = false;
+  for (size_t index = 0; index < len; ++index) {
+    const wchar_t cur = begin[index];
+    if (is_previous_hex && isascii(cur) && IsXDigit(static_cast<char>(cur))) {
+      // Previous character is of '\x..' form and this character can be
+      // interpreted as another hexadecimal digit in its number. Break string to
+      // disambiguate.
+      *os << "\" L\"";
+    }
+    is_previous_hex = PrintAsWideStringLiteralTo(cur, os) == kHexEscape;
+  }
+  *os << "\"";
+}
+
+// Prints the given C string to the ostream.
+void PrintTo(const char* s, ostream* os) {
+  if (s == NULL) {
+    *os << "NULL";
+  } else {
+    *os << ImplicitCast_<const void*>(s) << " pointing to ";
+    PrintCharsAsStringTo(s, strlen(s), os);
+  }
+}
+
+// MSVC compiler can be configured to define whar_t as a typedef
+// of unsigned short. Defining an overload for const wchar_t* in that case
+// would cause pointers to unsigned shorts be printed as wide strings,
+// possibly accessing more memory than intended and causing invalid
+// memory accesses. MSVC defines _NATIVE_WCHAR_T_DEFINED symbol when
+// wchar_t is implemented as a native type.
+#if !defined(_MSC_VER) || defined(_NATIVE_WCHAR_T_DEFINED)
+// Prints the given wide C string to the ostream.
+void PrintTo(const wchar_t* s, ostream* os) {
+  if (s == NULL) {
+    *os << "NULL";
+  } else {
+    *os << ImplicitCast_<const void*>(s) << " pointing to ";
+    PrintWideCharsAsStringTo(s, wcslen(s), os);
+  }
+}
+#endif  // wchar_t is native
+
+// Prints a ::string object.
+#if GTEST_HAS_GLOBAL_STRING
+void PrintStringTo(const ::string& s, ostream* os) {
+  PrintCharsAsStringTo(s.data(), s.size(), os);
+}
+#endif  // GTEST_HAS_GLOBAL_STRING
+
+void PrintStringTo(const ::std::string& s, ostream* os) {
+  PrintCharsAsStringTo(s.data(), s.size(), os);
+}
+
+// Prints a ::wstring object.
+#if GTEST_HAS_GLOBAL_WSTRING
+void PrintWideStringTo(const ::wstring& s, ostream* os) {
+  PrintWideCharsAsStringTo(s.data(), s.size(), os);
+}
+#endif  // GTEST_HAS_GLOBAL_WSTRING
+
+#if GTEST_HAS_STD_WSTRING
+void PrintWideStringTo(const ::std::wstring& s, ostream* os) {
+  PrintWideCharsAsStringTo(s.data(), s.size(), os);
+}
+#endif  // GTEST_HAS_STD_WSTRING
+
+}  // namespace internal
+
+}  // namespace testing
+// Copyright 2008, Google Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: mheule@google.com (Markus Heule)
+//
+// The Google C++ Testing Framework (Google Test)
+
+
+// Indicates that this translation unit is part of Google Test's
+// implementation.  It must come before gtest-internal-inl.h is
+// included, or there will be a compiler error.  This trick is to
+// prevent a user from accidentally including gtest-internal-inl.h in
+// his code.
+#define GTEST_IMPLEMENTATION_ 1
+#undef GTEST_IMPLEMENTATION_
+
+namespace testing {
+
+using internal::GetUnitTestImpl;
+
+// Gets the summary of the failure message by omitting the stack trace
+// in it.
+internal::String TestPartResult::ExtractSummary(const char* message) {
+  const char* const stack_trace = strstr(message, internal::kStackTraceMarker);
+  return stack_trace == NULL ? internal::String(message) :
+      internal::String(message, stack_trace - message);
+}
+
+// Prints a TestPartResult object.
+std::ostream& operator<<(std::ostream& os, const TestPartResult& result) {
+  return os
+      << result.file_name() << ":" << result.line_number() << ": "
+      << (result.type() == TestPartResult::kSuccess ? "Success" :
+          result.type() == TestPartResult::kFatalFailure ? "Fatal failure" :
+          "Non-fatal failure") << ":\n"
+      << result.message() << std::endl;
+}
+
+// Appends a TestPartResult to the array.
+void TestPartResultArray::Append(const TestPartResult& result) {
+  array_.push_back(result);
+}
+
+// Returns the TestPartResult at the given index (0-based).
+const TestPartResult& TestPartResultArray::GetTestPartResult(int index) const {
+  if (index < 0 || index >= size()) {
+    printf("\nInvalid index (%d) into TestPartResultArray.\n", index);
+    internal::posix::Abort();
+  }
+
+  return array_[index];
+}
+
+// Returns the number of TestPartResult objects in the array.
+int TestPartResultArray::size() const {
+  return static_cast<int>(array_.size());
+}
+
+namespace internal {
+
+HasNewFatalFailureHelper::HasNewFatalFailureHelper()
+    : has_new_fatal_failure_(false),
+      original_reporter_(GetUnitTestImpl()->
+                         GetTestPartResultReporterForCurrentThread()) {
+  GetUnitTestImpl()->SetTestPartResultReporterForCurrentThread(this);
+}
+
+HasNewFatalFailureHelper::~HasNewFatalFailureHelper() {
+  GetUnitTestImpl()->SetTestPartResultReporterForCurrentThread(
+      original_reporter_);
+}
+
+void HasNewFatalFailureHelper::ReportTestPartResult(
+    const TestPartResult& result) {
+  if (result.fatally_failed())
+    has_new_fatal_failure_ = true;
+  original_reporter_->ReportTestPartResult(result);
+}
+
+}  // namespace internal
+
+}  // namespace testing
+// Copyright 2008 Google Inc.
+// All Rights Reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+//     * Neither the name of Google Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: wan@google.com (Zhanyong Wan)
+
+
+namespace testing {
+namespace internal {
+
+#if GTEST_HAS_TYPED_TEST_P
+
+// Skips to the first non-space char in str. Returns an empty string if str
+// contains only whitespace characters.
+static const char* SkipSpaces(const char* str) {
+  while (IsSpace(*str))
+    str++;
+  return str;
+}
+
+// Verifies that registered_tests match the test names in
+// defined_test_names_; returns registered_tests if successful, or
+// aborts the program otherwise.
+const char* TypedTestCasePState::VerifyRegisteredTestNames(
+    const char* file, int line, const char* registered_tests) {
+  typedef ::std::set<const char*>::const_iterator DefinedTestIter;
+  registered_ = true;
+
+  // Skip initial whitespace in registered_tests since some
+  // preprocessors prefix stringizied literals with whitespace.
+  registered_tests = SkipSpaces(registered_tests);
+
+  Message errors;
+  ::std::set<String> tests;
+  for (const char* names = registered_tests; names != NULL;
+       names = SkipComma(names)) {
+    const String name = GetPrefixUntilComma(names);
+    if (tests.count(name) != 0) {
+      errors << "Test " << name << " is listed more than once.\n";
+      continue;
+    }
+
+    bool found = false;
+    for (DefinedTestIter it = defined_test_names_.begin();
+         it != defined_test_names_.end();
+         ++it) {
+      if (name == *it) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
+      tests.insert(name);
+    } else {
+      errors << "No test named " << name
+             << " can be found in this test case.\n";
+    }
+  }
+
+  for (DefinedTestIter it = defined_test_names_.begin();
+       it != defined_test_names_.end();
+       ++it) {
+    if (tests.count(*it) == 0) {
+      errors << "You forgot to list test " << *it << ".\n";
+    }
+  }
+
+  const String& errors_str = errors.GetString();
+  if (errors_str != "") {
+    fprintf(stderr, "%s %s", FormatFileLocation(file, line).c_str(),
+            errors_str.c_str());
+    fflush(stderr);
+    posix::Abort();
+  }
+
+  return registered_tests;
+}
+
+#endif  // GTEST_HAS_TYPED_TEST_P
+
+}  // namespace internal
+}  // namespace testing

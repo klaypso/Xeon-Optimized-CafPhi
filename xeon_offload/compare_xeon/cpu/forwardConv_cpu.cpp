@@ -166,4 +166,46 @@ void Offload_work(Convolution *cv)
   int i, j;
 
   int inputSize = cv->conv_in_channels_ * cv->conv_in_height_ * cv->conv_in_width_;
-  int outputSize = cv->conv_out_channels_ 
+  int outputSize = cv->conv_out_channels_ * cv->height_out_ * cv->width_out_;
+ 
+  for(i = 0; i < cv->num_; i++) {
+    forward_convolution(cv, i*inputSize, i*outputSize);
+  }
+  
+}
+
+
+int main()
+{
+  int j;
+  int num_devices = 0;
+
+  printf("Checking for Intel(R) Xeon Phi(TM) (Target CPU) devices...\n\n");
+
+#ifdef __INTEL_OFFLOAD
+  num_devices = _Offload_number_of_devices();
+#endif
+  printf("Number of Target devices installed: %d\n\n",num_devices);
+
+  /* Init system */
+  init();
+
+  /* Start timer */ 
+  double min_cpu = 1e30;
+  double startTime = CycleTimer::currentSeconds();
+
+  /* Do work */
+  for(j = 0; j < MAX_ITERATIONS; j++) {
+    Offload_work(cv);
+  }
+  
+  /* Stop timer and print */
+  double endTime = CycleTimer::currentSeconds();
+  if((endTime - startTime) < min_cpu)
+    min_cpu = endTime - startTime;
+
+  std::cout<< "\nTime Time for implicit = " << min_cpu * 1000 << "ms\n\n\n";  
+
+  return 0;
+}
+

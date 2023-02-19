@@ -1,3 +1,4 @@
+
 #ifndef _SYRAH_CYCLE_TIMER_H_
 #define _SYRAH_CYCLE_TIMER_H_
 
